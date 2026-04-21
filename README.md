@@ -8,6 +8,7 @@ Visual regression testing tool for comparing screenshots between two environment
 - **Smart Sampling**: Deterministic URL sampling with pattern grouping
 - **Screenshot Capture**: Playwright-based screenshot capture with masking support
 - **Diff Computation**: Pixel-level diff computation using odiff
+- **Interactive Report UI**: Built-in web interface for reviewing screenshot differences
 - **CLI**: Easy-to-use command-line interface
 
 ## Installation
@@ -37,6 +38,26 @@ pnpm --filter @visidiff/cli exec visidiff compare
 ```bash
 pnpm --filter @visidiff/cli exec visidiff rescreenshot
 ```
+
+## Interactive Report UI
+
+When you run `visidiff compare`, the tool automatically starts a local web server and opens your browser to an interactive report UI. The UI provides:
+
+- **Results Table**: Filterable and sortable list of compared URLs with diff percentages
+- **Side-by-Side View**: Compare original and updated screenshots side by side with synced scrolling
+- **Overlay Slider**: Blend between original and updated images with keyboard controls (←/→ for 10% steps, 0-9 for exact values)
+- **Diff Image View**: View pixel-level differences highlighted
+- **Viewport Tabs**: Switch between different viewport sizes (desktop, tablet, mobile)
+
+### CI/Non-Interactive Mode
+
+For CI environments or automated workflows, use the `--no-server` flag to skip starting the report server:
+
+```bash
+pnpm --filter @visidiff/cli exec visidiff compare --no-server
+```
+
+This runs the comparison pipeline and saves results to the output directory without starting the web server.
 
 ## Development
 

@@ -32,14 +32,20 @@ export async function runCompare(configPath: string, noServer = false): Promise<
   if (!noServer) {
     const uiPkg = await import.meta.resolve('@visidiff/ui/package.json');
     const uiDist = join(fileURLToPath(uiPkg), '..', 'dist');
-    const { url } = await startServer({ outputDir: config.outputDir, uiDistDir: uiDist });
-    console.log(`\n🌐 Report available at ${url}`);
-    await open(url);
+    const started = await startServer({ outputDir: config.outputDir, uiDistDir: uiDist });
+    console.log(`\n🌐 Report available at ${started.url}`);
+    await open(started.url);
     console.log('Press Ctrl+C to stop the server.');
 
+    const cleanup = async () => {
+      await started.app.close();
+      process.exit(0);
+    };
+    process.once('SIGINT', cleanup);
+    process.once('SIGTERM', cleanup);
+
     await new Promise<void>((resolve) => {
-      process.once('SIGINT', () => resolve());
-      process.once('SIGTERM', () => resolve());
+      // Keep process alive until signal
     });
   }
 }

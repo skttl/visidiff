@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.site-diff-cache/
+visidiff-output/
+*.log
+.DS_Store
+.env
+.env.local
+coverage/

@@ -1,5 +1,3 @@
-const robotsParser: any = require('robots-parser');
-
 export interface FetchLike {
   (url: string): Promise<{ ok: boolean; status: number; text: () => Promise<string> }>;
 }
@@ -27,6 +25,7 @@ export class RobotsChecker {
     } catch {
       // treat as empty — allow-all
     }
+    const robotsParser = (await import('robots-parser')) as any;
     const robots = robotsParser(robotsUrl, text);
     return new RobotsChecker(robots, userAgent, false);
   }

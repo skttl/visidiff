@@ -6,4 +6,4 @@ export { validateConfig, loadConfigFromFile, DEFAULT_CONFIG } from './config.js'
 export * from './screenshot/index.js';
 export * from './pipeline/index.js';
 export * from './diff/index.js';
-export * from './output/index.js';
+export * from './output/storage.js';

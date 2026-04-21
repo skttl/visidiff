@@ -15,6 +15,7 @@
     "cheerio": "^1.0.0-rc.12",
     "odiff-bin": "^3.2.0",
     "p-queue": "^8.0.1",
+    "picomatch": "^4.0.4",
     "pino": "^9.1.0",
     "playwright": "^1.44.0",
     "robots-parser": "^3.0.1",
@@ -23,6 +24,7 @@
   },
   "devDependencies": {
     "@types/node": "^20.12.0",
+    "@types/picomatch": "^4.0.3",
     "typescript": "^5.4.0"
   }
 }

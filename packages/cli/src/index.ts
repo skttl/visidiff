@@ -16,8 +16,9 @@ program
   .command('compare [config]')
   .description('Run visual regression comparison')
   .option('-c, --config <path>', 'Path to config file', 'visidiff.config.js')
-  .action(async (config) => {
-    await runCompare(config);
+  .option('--no-server', 'Do not start the report server after compare')
+  .action(async (config, options) => {
+    await runCompare(config, options.noServer);
   });
 
 program

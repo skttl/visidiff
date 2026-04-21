@@ -6,12 +6,15 @@
     "visidiff": "./bin/visidiff.js"
   },
   "scripts": {
+    "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
     "@visidiff/core": "workspace:*",
-    "commander": "^11.1.0"
+    "@visidiff/server": "workspace:*",
+    "commander": "^11.1.0",
+    "open": "^10.0.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

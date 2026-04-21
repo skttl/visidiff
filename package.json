@@ -7,7 +7,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "pnpm -r typecheck",
-    "lint": "prettier --check \"packages/**/*.{ts,json,md}\""
+    "lint": "prettier --check \"packages/**/*.{ts,json,md}\"",
+    "prebuild:cli": "pnpm --filter @visidiff/ui build"
   },
   "devDependencies": {
     "@types/node": "^20.12.0",

@@ -1,9 +1,12 @@
 import { runPipeline } from '@visidiff/core';
 import { loadConfigFromFile } from '@visidiff/core';
+import { startServer } from '@visidiff/server';
+import open from 'open';
 import { join } from 'node:path';
 import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 
-export async function runCompare(configPath: string): Promise<void> {
+export async function runCompare(configPath: string, noServer = false): Promise<void> {
   const cwd = process.cwd();
   const resolvedConfig = join(cwd, configPath);
 
@@ -25,4 +28,18 @@ export async function runCompare(configPath: string): Promise<void> {
   });
 
   console.log(`Done. Results saved to: ${config.outputDir}`);
+
+  if (!noServer) {
+    const uiPkg = await import.meta.resolve('@visidiff/ui/package.json');
+    const uiDist = join(fileURLToPath(uiPkg), '..', 'dist');
+    const { url } = await startServer({ outputDir: config.outputDir, uiDistDir: uiDist });
+    console.log(`\n🌐 Report available at ${url}`);
+    await open(url);
+    console.log('Press Ctrl+C to stop the server.');
+
+    await new Promise<void>((resolve) => {
+      process.once('SIGINT', () => resolve());
+      process.once('SIGTERM', () => resolve());
+    });
+  }
 }

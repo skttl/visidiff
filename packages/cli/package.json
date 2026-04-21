@@ -1,0 +1,19 @@
+{
+  "name": "@visidiff/cli",
+  "version": "0.0.0",
+  "type": "module",
+  "bin": {
+    "visidiff": "./bin/visidiff.js"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@visidiff/core": "workspace:*",
+    "commander": "^11.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "typescript": "^5.5.0"
+  }
+}

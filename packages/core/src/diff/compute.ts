@@ -2,7 +2,6 @@ import { writeFile, unlink, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
-import { compare } from 'odiff-bin';
 import { padImagesToSameHeight } from './pad.js';
 
 export interface DiffResult {
@@ -28,6 +27,7 @@ export async function computeDiff(
     await writeFile(tempA, paddedA);
     await writeFile(tempB, paddedB);
 
+    const { compare } = await import('odiff-bin') as any;
     const result = await compare(tempA, tempB, diffPath, {
       outputDiffMask: true,
       threshold: 0,

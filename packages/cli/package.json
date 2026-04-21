@@ -8,7 +8,10 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "compare": "node bin/visidiff.js compare",
+    "init": "node bin/visidiff.js init",
+    "rescreenshot": "node bin/visidiff.js rescreenshot"
   },
   "dependencies": {
     "@visidiff/core": "workspace:*",

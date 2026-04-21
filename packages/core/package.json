@@ -15,8 +15,9 @@
     "cheerio": "^1.0.0-rc.12",
     "odiff-bin": "^3.2.0",
     "p-queue": "^8.0.1",
-    "playwright": "^1.44.0",
     "pino": "^9.1.0",
+    "playwright": "^1.44.0",
+    "robots-parser": "^3.0.1",
     "sharp": "^0.33.3",
     "zod": "^3.23.0"
   },

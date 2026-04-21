@@ -38,6 +38,9 @@ importers:
       playwright:
         specifier: ^1.44.0
         version: 1.59.1
+      robots-parser:
+        specifier: ^3.0.1
+        version: 3.0.1
       sharp:
         specifier: ^0.33.3
         version: 0.33.5
@@ -769,6 +772,10 @@ packages:
   real-require@0.2.0:
     resolution: {integrity: sha512-57frrGM/OCTLqLOAh0mhVA9VBMHd+9U7Zb2THMGdBUoZVOtGbJzjxsYGDJ3A9AYYCP4hn6y1TVbaOfzWtm5GFg==}
     engines: {node: '>= 12.13.0'}
+
+  robots-parser@3.0.1:
+    resolution: {integrity: sha512-s+pyvQeIKIZ0dx5iJiQk1tPLJAWln39+MI5jtM8wnyws+G5azk+dMnMX0qfbqNetKKNgcWWOdi0sfm+FbQbgdQ==}
+    engines: {node: '>=10.0.0'}
 
   rollup@4.60.2:
     resolution: {integrity: sha512-J9qZyW++QK/09NyN/zeO0dG/1GdGfyp9lV8ajHnRVLfo/uFsbji5mHnDgn/qYdUHyCkM2N+8VyspgZclfAh0eQ==}
@@ -1565,6 +1572,8 @@ snapshots:
   react-is@18.3.1: {}
 
   real-require@0.2.0: {}
+
+  robots-parser@3.0.1: {}
 
   rollup@4.60.2:
     dependencies:

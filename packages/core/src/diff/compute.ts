@@ -2,7 +2,7 @@ import { writeFile, unlink, mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
-const { compare } = require('odiff-bin');
+import { compare } from 'odiff-bin';
 import { padImagesToSameHeight } from './pad.js';
 
 export interface DiffResult {
@@ -29,11 +29,11 @@ export async function computeDiff(
     await writeFile(tempB, paddedB);
 
     const result = await compare(tempA, tempB, diffPath, {
-      diffMask: true,
+      outputDiffMask: true,
       threshold: 0,
     });
 
-    const diffPercent = result.diffPercentage;
+    const diffPercent = result.match === false && 'diffPercentage' in result ? result.diffPercentage : 0;
     if (isNaN(diffPercent) || diffPercent < threshold * 100) {
       return null;
     }

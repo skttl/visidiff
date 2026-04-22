@@ -1,6 +1,6 @@
 import { loadConfigFromFile, type VisidiffConfig } from '@visidiff/core';
 import { readdir } from 'node:fs/promises';
-import { join } from 'node:path';
+import { getConfigDir, getConfigPath } from '../paths.js';
 
 const CONFIG_FILE_PATTERN = /^[^.].*\.visidiff\.config\.js$/;
 /**
@@ -12,8 +12,9 @@ export interface ConfigEntry {
   config: VisidiffConfig;
 }
 
-export async function discoverConfigs(cwd: string): Promise<ConfigEntry[]> {
-  const entries = await readdir(cwd, { withFileTypes: true });
+export async function discoverConfigs(): Promise<ConfigEntry[]> {
+  const configDir = getConfigDir();
+  const entries = await readdir(configDir, { withFileTypes: true });
   const configFiles = entries
     .filter((entry) => entry.isFile() && CONFIG_FILE_PATTERN.test(entry.name))
     .map((entry) => entry.name)
@@ -21,7 +22,7 @@ export async function discoverConfigs(cwd: string): Promise<ConfigEntry[]> {
 
   const configs = await Promise.all(
     configFiles.map(async (filename) => {
-      const absolutePath = join(cwd, filename);
+      const absolutePath = getConfigPath(filename);
       const config = await loadConfigFromFile(absolutePath);
       return { filename, absolutePath, config } satisfies ConfigEntry;
     }),

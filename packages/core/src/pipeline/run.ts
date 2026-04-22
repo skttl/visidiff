@@ -4,6 +4,7 @@ import type { VisidiffConfig, RunData, ComparisonRecord, UrlRecord, ViewportDiff
 import { logger } from '../logger.js';
 import { discoverUrls } from '../crawler/index.js';
 import { parsePattern, substitute } from '../url-pattern.js';
+import { filterUpdatedUrls } from './filter-updated-urls.js';
 import { captureScreenshot } from '../screenshot/index.js';
 import { computeDiff } from '../diff/compute.js';
 import { writeRunData, writeComparisonRecord } from '../output/storage.js';
@@ -19,6 +20,7 @@ export type ProgressEvent =
 
 export interface PipelineOptions {
   config: VisidiffConfig;
+  outputDir: string;
   runId: string;
   fetcher: (url: string) => Promise<Response>;
   progress?: (event: ProgressEvent | string) => void;
@@ -75,8 +77,7 @@ function createUrlIds(urls: string[]): string[] {
 }
 
 export async function runPipeline(opts: PipelineOptions): Promise<RunData> {
-  const { config, runId, fetcher, progress = () => {} } = opts;
-  const outputDir = config.outputDir;
+  const { config, outputDir, runId, fetcher, progress = () => {} } = opts;
 
   progress({ type: 'discover:start' });
   const groups = await discoverUrls({
@@ -95,10 +96,16 @@ export async function runPipeline(opts: PipelineOptions): Promise<RunData> {
     },
   });
 
-  const allUrls = groups.flatMap((g) => g.sampled);
+  const originalPattern = parsePattern(config.original);
+  const updatedPattern = parsePattern(config.updated);
+
+  // Filter out URLs whose updated counterpart returns 404
+  const filteredGroups = await filterUpdatedUrls(groups, originalPattern, updatedPattern, fetcher);
+
+  const allUrls = filteredGroups.flatMap((g) => g.sampled);
   const urlIds = createUrlIds(allUrls);
   const groupByUrl = new Map<string, string>();
-  for (const g of groups) {
+  for (const g of filteredGroups) {
     for (const u of g.sampled) {
       groupByUrl.set(u, g.pattern);
     }
@@ -106,12 +113,10 @@ export async function runPipeline(opts: PipelineOptions): Promise<RunData> {
   progress({ type: 'discover:done', urlCount: allUrls.length });
 
   const comparisons: ComparisonRecord[] = [];
+  const failedComparisons: ComparisonRecord[] = [];
   let succeeded = 0;
   let failed = 0;
   let skipped = 0;
-
-  const originalPattern = parsePattern(config.original);
-  const updatedPattern = parsePattern(config.updated);
 
   await mkdir(join(outputDir, 'original'), { recursive: true });
   await mkdir(join(outputDir, 'updated'), { recursive: true });
@@ -207,13 +212,24 @@ export async function runPipeline(opts: PipelineOptions): Promise<RunData> {
 
       // Check if any viewport failed to determine overall URL status
       const hasFailedViewport = viewports.some((v) => v.status === 'failed');
-      if (hasFailedViewport) {
+      const allFailed = viewports.every((v) => v.status === 'failed');
+
+      if (allFailed) {
+        urlRecord.error = viewports
+          .map((v) => v.error)
+          .filter((e): e is string => Boolean(e))
+          .join('; ');
+        failedComparisons.push({ url: urlRecord, viewports });
         failed++;
       } else {
-        succeeded++;
+        if (hasFailedViewport) {
+          failed++;
+        } else {
+          succeeded++;
+        }
+        comparisons.push({ url: urlRecord, viewports });
       }
 
-      comparisons.push({ url: urlRecord, viewports });
       progress({ type: 'url:done', url, index, total: allUrls.length, status: hasFailedViewport ? 'failed' : 'succeeded' });
     });
   } finally {
@@ -230,6 +246,7 @@ export async function runPipeline(opts: PipelineOptions): Promise<RunData> {
       threshold: config.threshold,
     },
     comparisons,
+    failedComparisons,
     stats: {
       totalUrls: allUrls.length,
       succeeded,

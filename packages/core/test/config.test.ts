@@ -36,7 +36,7 @@ describe('validateConfig', () => {
 });
 
 describe('loadConfigFromFile', () => {
-  it('derives outputDir from JS config filename', async () => {
+  it('loads JS config file', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'visi-cfg-'));
     const configPath = join(dir, 'my-site.visidiff.config.js');
     writeFileSync(
@@ -45,7 +45,7 @@ describe('loadConfigFromFile', () => {
       'utf8',
     );
     const cfg = await loadConfigFromFile(configPath);
-    expect(cfg.outputDir).toBe(join(dir, '.visidiff', 'output', 'my-site'));
     expect(cfg.original).toBe('https://a.com/*');
+    expect(cfg.updated).toBe('https://b.com/*');
   });
 });

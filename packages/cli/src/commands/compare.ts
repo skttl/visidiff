@@ -3,10 +3,11 @@ import { loadConfigFromFile } from '@visidiff/core';
 import { startServer } from '@visidiff/server';
 import { log, note, spinner } from '@clack/prompts';
 import open from 'open';
-import { dirname, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { existsSync } from 'node:fs';
-import { rm } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
+import { getRunsDir } from '../paths.js';
 
 function renderProgressBar(done: number, total: number, width = 24): string {
   const safeTotal = Math.max(1, total);
@@ -29,22 +30,92 @@ function formatDiscoveryMessage(discoveredUrls: number, latestDiscoveredUrls: st
   return `Discovering URLs... ${discoveredUrls} found | Latest: ${latestDiscoveredUrls[latestDiscoveredUrls.length - 1]}`;
 }
 
-export async function runCompare(configPath: string): Promise<void> {
-  const cwd = process.cwd();
-  const configFilePath = resolve(cwd, configPath);
+function createTimestampFolder(): string {
+  const now = new Date();
+  const iso = now.toISOString();
+  return iso.replace(/[:.]/g, '-');
+}
+
+function getConfigName(configPath: string): string {
+  return basename(configPath, '.visidiff.config.js');
+}
+
+async function startReportServer(outputDir: string): Promise<void> {
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = dirname(__filename);
+  const uiDist = resolve(__dirname, '../../../../packages/ui/dist');
+  const started = await startServer({ outputDir, uiDistDir: uiDist });
+
+  note(`${started.url}\nPress Ctrl+C to stop the server.`, 'Report server');
+  await open(started.url);
+
+  let shuttingDown = false;
+  let resolveShutdown = () => {};
+  const shutdownComplete = new Promise<void>((resolve) => {
+    resolveShutdown = resolve;
+  });
+
+  const cleanup = async () => {
+    if (shuttingDown) {
+      return;
+    }
+
+    shuttingDown = true;
+    process.off('SIGINT', cleanup);
+    process.off('SIGTERM', cleanup);
+    process.stdin.off('data', handleStdinData);
+
+    try {
+      await started.app.close();
+    } finally {
+      resolveShutdown();
+    }
+  };
+
+  const handleStdinData = (chunk: Buffer | string) => {
+    const value = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+    if (value.includes('\u0003')) {
+      void cleanup();
+    }
+  };
 
   restoreTerminalInput();
+  process.stdin.resume();
+  process.once('SIGINT', cleanup);
+  process.once('SIGTERM', cleanup);
+  process.stdin.on('data', handleStdinData);
 
-  if (!existsSync(configFilePath)) {
-    log.error(`Config file not found: ${configFilePath}`);
+  await shutdownComplete;
+  process.exit(0);
+}
+
+export async function openRun(outputDir: string): Promise<void> {
+  restoreTerminalInput();
+
+  if (!existsSync(outputDir)) {
+    log.error(`Run output not found: ${outputDir}`);
     process.exit(1);
   }
 
-  const config = await loadConfigFromFile(configFilePath);
-  const runId = config.runId ?? Date.now().toString();
-  const outputDir = resolve(cwd, config.outputDir);
+  log.step(`Opening previous run: ${outputDir}`);
+  await startReportServer(outputDir);
+}
 
-  await rm(outputDir, { recursive: true, force: true });
+export async function runCompare(configPath: string): Promise<void> {
+  if (!existsSync(configPath)) {
+    log.error(`Config file not found: ${configPath}`);
+    process.exit(1);
+  }
+
+  restoreTerminalInput();
+
+  const config = await loadConfigFromFile(configPath);
+  const runId = config.runId ?? Date.now().toString();
+  const configName = getConfigName(configPath);
+  const timestamp = createTimestampFolder();
+  const outputDir = join(getRunsDir(configName), timestamp);
+
+  await mkdir(outputDir, { recursive: true });
 
   log.step(`Starting visidiff comparison (run: ${runId})`);
 
@@ -58,6 +129,7 @@ export async function runCompare(configPath: string): Promise<void> {
 
   await runPipeline({
     config,
+    outputDir,
     runId,
     fetcher: async (url: string) => fetch(url),
     progress: (event) => {
@@ -112,52 +184,6 @@ export async function runCompare(configPath: string): Promise<void> {
     },
   });
 
-  note(`Results saved to: ${config.outputDir}`, 'Comparison complete');
-
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = dirname(__filename);
-  const uiDist = resolve(__dirname, '../../../../packages/ui/dist');
-  const started = await startServer({ outputDir, uiDistDir: uiDist });
-
-  note(`${started.url}\nPress Ctrl+C to stop the server.`, 'Report server');
-  await open(started.url);
-
-  let shuttingDown = false;
-  let resolveShutdown = () => {};
-  const shutdownComplete = new Promise<void>((resolve) => {
-    resolveShutdown = resolve;
-  });
-
-  const cleanup = async () => {
-    if (shuttingDown) {
-      return;
-    }
-
-    shuttingDown = true;
-    process.off('SIGINT', cleanup);
-    process.off('SIGTERM', cleanup);
-    process.stdin.off('data', handleStdinData);
-
-    try {
-      await started.app.close();
-    } finally {
-      resolveShutdown();
-    }
-  };
-
-  const handleStdinData = (chunk: Buffer | string) => {
-    const value = typeof chunk === 'string' ? chunk : chunk.toString('utf8');
-    if (value.includes('\u0003')) {
-      void cleanup();
-    }
-  };
-
-  restoreTerminalInput();
-  process.stdin.resume();
-  process.once('SIGINT', cleanup);
-  process.once('SIGTERM', cleanup);
-  process.stdin.on('data', handleStdinData);
-
-  await shutdownComplete;
-  process.exit(0);
+  note(`Results saved to: ${outputDir}`, 'Comparison complete');
+  await startReportServer(outputDir);
 }

@@ -34,7 +34,6 @@ export interface VisidiffConfig {
   originalAuth: AuthConfig;
   updatedAuth: AuthConfig;
   beforeScreenshot?: string;
-  outputDir: string;
   runId?: string;
 }
 
@@ -79,6 +78,7 @@ export interface RunData {
   createdAt: string;
   config: Pick<VisidiffConfig, 'original' | 'updated' | 'viewports' | 'threshold'>;
   comparisons: ComparisonRecord[];
+  failedComparisons?: ComparisonRecord[];
   stats: {
     totalUrls: number;
     succeeded: number;

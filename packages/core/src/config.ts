@@ -1,7 +1,6 @@
 import { z } from 'zod';
 import type { VisidiffConfig } from './types.js';
 import { pathToFileURL } from 'node:url';
-import { basename, dirname, join } from 'node:path';
 
 export const DEFAULT_CONFIG = {
   viewports: [1440, 390],
@@ -10,7 +9,7 @@ export const DEFAULT_CONFIG = {
   exclude: [] as string[],
   blockedRequestUrls: [] as string[],
   samplesPerGroup: 2,
-  samplingThreshold: 5,
+  samplingThreshold: 3,
   fullPageMaxHeight: 10_000,
   concurrency: 4,
   requestDelayMs: 0,
@@ -59,14 +58,12 @@ const ConfigSchema = z.object({
   runId: z.string().optional(),
 });
 
-export function validateConfig(input: unknown): Omit<VisidiffConfig, 'outputDir'> {
-  return ConfigSchema.parse(input) as Omit<VisidiffConfig, 'outputDir'>;
+export function validateConfig(input: unknown): VisidiffConfig {
+  return ConfigSchema.parse(input) as VisidiffConfig;
 }
 
 export async function loadConfigFromFile(path: string): Promise<VisidiffConfig> {
   const mod = await import(pathToFileURL(path).href);
   const raw = mod.default ?? mod;
-  const validated = validateConfig(raw);
-  const outputDir = join(dirname(path), '.visidiff', 'output', basename(path, '.visidiff.config.js'));
-  return { ...validated, outputDir };
+  return validateConfig(raw);
 }

@@ -16,6 +16,7 @@ describe('output storage', () => {
         createdAt: new Date().toISOString(),
         config: { original: 'https://a.com', updated: 'https://b.com', viewports: [1440], threshold: 0.1 },
         comparisons: [],
+        failedComparisons: [],
         stats: { totalUrls: 0, succeeded: 0, failed: 0, skipped: 0 },
       };
       await writeRunData(dir, runId, data);

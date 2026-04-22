@@ -5,6 +5,10 @@
   "bin": {
     "visidiff": "./bin/visidiff.js"
   },
+  "files": ["dist", "bin"],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",

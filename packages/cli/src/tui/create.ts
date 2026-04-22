@@ -2,9 +2,10 @@ import { confirm, isCancel, text } from '@clack/prompts';
 import { DEFAULT_CONFIG } from '@visidiff/core';
 import { existsSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { getConfigPath, ensureDataDirs } from '../paths.js';
 
-export async function createConfig(cwd: string): Promise<string | null> {
+export async function createConfig(): Promise<string | null> {
+  await ensureDataDirs();
   const name = await text({
     message: 'Config name',
     placeholder: 'marketing-site',
@@ -95,7 +96,7 @@ export async function createConfig(cwd: string): Promise<string | null> {
   }
 
   const filename = `${name.trim()}.visidiff.config.js`;
-  const absolutePath = join(cwd, filename);
+  const absolutePath = getConfigPath(filename);
 
   if (existsSync(absolutePath)) {
     const overwrite = await confirm({

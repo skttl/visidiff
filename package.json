@@ -8,9 +8,12 @@
     "test:watch": "vitest",
     "typecheck": "pnpm -r typecheck",
     "lint": "prettier --check \"packages/**/*.{ts,json,md}\"",
-    "prebuild:cli": "pnpm --filter @visidiff/ui build"
+    "prebuild:cli": "pnpm --filter @visidiff/ui build",
+    "version-packages": "changeset version && pnpm install --no-frozen-lockfile",
+    "release": "pnpm -r publish --access public --no-git-checks"
   },
   "devDependencies": {
+    "@changesets/cli": "^2.27.0",
     "@types/node": "^20.12.0",
     "prettier": "^3.2.0",
     "typescript": "^5.4.0",

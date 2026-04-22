@@ -1,11 +1,14 @@
 {
   "name": "@visidiff/cli",
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "bin": {
     "visidiff": "./bin/visidiff.js"
   },
-  "files": ["dist", "bin"],
+  "files": [
+    "dist",
+    "bin"
+  ],
   "publishConfig": {
     "access": "public"
   },

@@ -2,6 +2,7 @@ import { RobotsChecker, type FetchLike } from './robots.js';
 import { fetchSitemapUrls } from './sitemap.js';
 import { crawl } from './http-crawler.js';
 import { groupAndSample } from './sampling.js';
+import { hasHtmlLikePath } from './content-type.js';
 import type { UrlGroup } from '../types.js';
 
 export interface DiscoverOptions {
@@ -16,10 +17,12 @@ export interface DiscoverOptions {
   seed: string;
   pinned?: string[];
   urlsOverride?: string[];
+  onProgress?: (urlCount: number, latestUrl: string) => void;
 }
 
 export async function discoverUrls(opts: DiscoverOptions): Promise<UrlGroup[]> {
   if (opts.urlsOverride && opts.urlsOverride.length > 0) {
+    opts.onProgress?.(opts.urlsOverride.length, opts.urlsOverride[opts.urlsOverride.length - 1]!);
     return groupAndSample(opts.urlsOverride, {
       samplesPerGroup: opts.samplesPerGroup,
       threshold: opts.samplingThreshold,
@@ -29,18 +32,23 @@ export async function discoverUrls(opts: DiscoverOptions): Promise<UrlGroup[]> {
   }
 
   const robots = await RobotsChecker.load(opts.origin, opts.fetcher, { ignore: opts.ignoreRobots });
-  const sitemap = await fetchSitemapUrls(opts.origin, opts.fetcher);
+  const sitemap = await fetchSitemapUrls(opts.origin, opts.fetcher, opts.onProgress);
 
-  let urls: string[] = sitemap.filter((u) => robots.isAllowed(u));
+  let urls: string[] = sitemap.filter((u) => robots.isAllowed(u) && hasHtmlLikePath(u));
+  if (urls.length > 0) {
+    opts.onProgress?.(urls.length, urls[urls.length - 1]!);
+  }
   if (urls.length === 0) {
-    urls = await crawl({
+    const crawlOptions = {
       start: opts.origin,
       fetcher: opts.fetcher,
       maxDepth: opts.maxDepth,
       maxPages: opts.maxPages,
-      isAllowed: (u) => robots.isAllowed(u),
+      isAllowed: (u: string) => robots.isAllowed(u),
       exclude: opts.exclude,
-    });
+      ...(opts.onProgress ? { onProgress: opts.onProgress } : {}),
+    };
+    urls = await crawl(crawlOptions);
   }
 
   urls = urls.slice(0, opts.maxPages);

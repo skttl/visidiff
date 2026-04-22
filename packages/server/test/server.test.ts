@@ -5,11 +5,11 @@ import { describe, expect, it } from 'vitest';
 import { createServer } from '../src/index.js';
 
 describe('server', () => {
-  it('serves /api/data when data.json exists', async () => {
+  it('serves /api/data when run.json exists', async () => {
     const out = await mkdtemp(join(tmpdir(), 'visi-srv-'));
     await mkdir(join(out, 'screenshots'), { recursive: true });
     const payload = { version: 1, comparisons: [], stats: {} };
-    await writeFile(join(out, 'data.json'), JSON.stringify(payload));
+    await writeFile(join(out, 'run.json'), JSON.stringify(payload));
     const app = await createServer({ outputDir: out, uiDistDir: join(out, 'noexist') });
     const res = await app.inject({ method: 'GET', url: '/api/data' });
     expect(res.statusCode).toBe(200);
@@ -17,7 +17,7 @@ describe('server', () => {
     await app.close();
   });
 
-  it('returns 404 when data.json missing', async () => {
+  it('returns 404 when run.json missing', async () => {
     const out = await mkdtemp(join(tmpdir(), 'visi-srv-'));
     const app = await createServer({ outputDir: out, uiDistDir: join(out, 'noexist') });
     const res = await app.inject({ method: 'GET', url: '/api/data' });

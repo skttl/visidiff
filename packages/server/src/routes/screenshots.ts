@@ -1,11 +1,12 @@
 import staticPlugin from '@fastify/static';
-import { join } from 'node:path';
+import { existsSync } from 'node:fs';
 import type { FastifyInstance } from 'fastify';
 import type { ServerOptions } from '../types.js';
 
 export function registerScreenshotRoutes(app: FastifyInstance, opts: ServerOptions) {
+  if (!existsSync(opts.outputDir)) return;
   void app.register(staticPlugin, {
-    root: join(opts.outputDir, 'screenshots'),
+    root: opts.outputDir,
     prefix: '/screenshots/',
     decorateReply: false,
     cacheControl: false,

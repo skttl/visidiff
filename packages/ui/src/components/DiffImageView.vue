@@ -1,7 +1,7 @@
 <script setup lang="ts">
 defineProps<{ diffSrc: string | null }>();
 function imgSrc(p: string) {
-  return `/screenshots/${p.split('/').pop()}`;
+  return `/screenshots/${p.replace(/\\/g, '/')}`;
 }
 </script>
 
@@ -14,6 +14,6 @@ function imgSrc(p: string) {
 
 <style scoped>
 .diff { overflow: auto; height: 100%; background: white; }
-.diff img { display: block; width: 100%; }
+.diff img { display: block; }
 .empty { padding: 2rem; color: var(--muted); }
 </style>

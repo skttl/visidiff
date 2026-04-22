@@ -6,7 +6,7 @@ const opacity = ref(0.5);
 const blendDiff = ref(false);
 
 function imgSrc(p: string) {
-  return `/screenshots/${p.split('/').pop()}`;
+  return `/screenshots/${p.replace(/\\/g, '/')}`;
 }
 
 function clamp(v: number) {
@@ -75,7 +75,6 @@ onUnmounted(() => window.removeEventListener('keydown', onKey));
 .stage { position: relative; flex: 1; overflow: auto; background: white; }
 .base, .over {
   display: block;
-  width: 100%;
   top: 0;
   left: 0;
 }

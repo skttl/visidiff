@@ -18,7 +18,7 @@ function onScroll(source: 'left' | 'right') {
 }
 
 function imgSrc(p: string) {
-  return `/screenshots/${p.split('/').pop()}`;
+  return `/screenshots/${p.replace(/\\/g, '/')}`;
 }
 </script>
 

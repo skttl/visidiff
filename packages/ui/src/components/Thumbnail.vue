@@ -3,7 +3,7 @@ defineProps<{ src: string; alt: string }>();
 </script>
 
 <template>
-  <img class="thumb" :src="`/screenshots/${src.split('/').pop()}`" :alt="alt" loading="lazy" />
+  <img class="thumb" :src="`/screenshots/${src.replace(/\\/g, '/')}`" :alt="alt" loading="lazy" />
 </template>
 
 <style scoped>

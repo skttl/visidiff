@@ -21,6 +21,7 @@ export interface VisidiffConfig {
   maxDepth: number;
   maxPages: number;
   exclude: string[];
+  blockedRequestUrls: string[];
   samplesPerGroup: number;
   samplingThreshold: number;
   fullPageMaxHeight: number;
@@ -34,7 +35,6 @@ export interface VisidiffConfig {
   updatedAuth: AuthConfig;
   beforeScreenshot?: string;
   outputDir: string;
-  cacheDir: string;
   runId?: string;
 }
 

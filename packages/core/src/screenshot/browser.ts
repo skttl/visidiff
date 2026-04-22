@@ -19,6 +19,7 @@ export async function createContext(
     viewport: { width: opts.viewport, height: 900 },
     deviceScaleFactor: 1,
     reducedMotion: 'reduce',
+    serviceWorkers: 'block',
     httpCredentials: parseBasic(opts.auth.basic),
   };
   if (opts.auth.headers) {

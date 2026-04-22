@@ -33,3 +33,25 @@ export function substitute(
   }
   return `${target.prefix}${afterPrefix}${target.suffix}`;
 }
+
+export function matchesPattern(url: string, pattern: UrlPattern): boolean {
+  if (!url.startsWith(pattern.prefix)) return false;
+  const afterPrefix = url.slice(pattern.prefix.length);
+  if (pattern.suffix) {
+    return afterPrefix.includes(pattern.suffix);
+  }
+  return true;
+}
+
+export function patternToRegExp(pattern: UrlPattern): RegExp {
+  const escapedPrefix = escapeForRegExp(pattern.prefix);
+  const escapedSuffix = escapeForRegExp(pattern.suffix);
+  if (!pattern.suffix) {
+    return new RegExp(`^${escapedPrefix}.*$`);
+  }
+  return new RegExp(`^${escapedPrefix}.*${escapedSuffix}.*$`);
+}
+
+function escapeForRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}

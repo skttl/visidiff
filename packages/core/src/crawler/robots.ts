@@ -1,5 +1,15 @@
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const robotsParser = require('robots-parser');
+
 export interface FetchLike {
-  (url: string): Promise<{ ok: boolean; status: number; text: () => Promise<string> }>;
+  (url: string): Promise<{
+    ok: boolean;
+    status: number;
+    headers: { get(name: string): string | null };
+    text: () => Promise<string>;
+  }>;
 }
 
 export interface RobotsOptions {
@@ -25,7 +35,6 @@ export class RobotsChecker {
     } catch {
       // treat as empty — allow-all
     }
-    const robotsParser = (await import('robots-parser')) as any;
     const robots = robotsParser(robotsUrl, text);
     return new RobotsChecker(robots, userAgent, false);
   }

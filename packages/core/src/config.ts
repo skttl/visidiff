@@ -1,11 +1,14 @@
 import { z } from 'zod';
 import type { VisidiffConfig } from './types.js';
+import { pathToFileURL } from 'node:url';
+import { basename, dirname, join } from 'node:path';
 
 export const DEFAULT_CONFIG = {
   viewports: [1440, 390],
   maxDepth: 3,
   maxPages: 200,
   exclude: [] as string[],
+  blockedRequestUrls: [] as string[],
   samplesPerGroup: 2,
   samplingThreshold: 5,
   fullPageMaxHeight: 10_000,
@@ -17,8 +20,6 @@ export const DEFAULT_CONFIG = {
   mask: [] as string[],
   originalAuth: {},
   updatedAuth: {},
-  outputDir: './visidiff-output',
-  cacheDir: './.visidiff-cache',
 } as const;
 
 const AuthSchema = z.object({
@@ -42,6 +43,7 @@ const ConfigSchema = z.object({
   maxDepth: z.number().int().nonnegative().default(DEFAULT_CONFIG.maxDepth),
   maxPages: z.number().int().positive().default(DEFAULT_CONFIG.maxPages),
   exclude: z.array(z.string()).default([]),
+  blockedRequestUrls: z.array(z.string()).default([]),
   samplesPerGroup: z.number().int().positive().default(DEFAULT_CONFIG.samplesPerGroup),
   samplingThreshold: z.number().int().min(2).default(DEFAULT_CONFIG.samplingThreshold),
   fullPageMaxHeight: z.number().int().positive().default(DEFAULT_CONFIG.fullPageMaxHeight),
@@ -54,17 +56,17 @@ const ConfigSchema = z.object({
   originalAuth: AuthSchema.default({}),
   updatedAuth: AuthSchema.default({}),
   beforeScreenshot: z.string().optional(),
-  outputDir: z.string().default(DEFAULT_CONFIG.outputDir),
-  cacheDir: z.string().default(DEFAULT_CONFIG.cacheDir),
   runId: z.string().optional(),
 });
 
-export function validateConfig(input: unknown): VisidiffConfig {
-  return ConfigSchema.parse(input) as VisidiffConfig;
+export function validateConfig(input: unknown): Omit<VisidiffConfig, 'outputDir'> {
+  return ConfigSchema.parse(input) as Omit<VisidiffConfig, 'outputDir'>;
 }
 
 export async function loadConfigFromFile(path: string): Promise<VisidiffConfig> {
-  const mod = await import(path);
+  const mod = await import(pathToFileURL(path).href);
   const raw = mod.default ?? mod;
-  return validateConfig(raw);
+  const validated = validateConfig(raw);
+  const outputDir = join(dirname(path), '.visidiff', 'output', basename(path, '.visidiff.config.js'));
+  return { ...validated, outputDir };
 }

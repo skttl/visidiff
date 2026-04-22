@@ -1,6 +1,7 @@
 import * as cheerio from 'cheerio';
 import picomatch from 'picomatch';
 import type { FetchLike } from './robots.js';
+import { hasHtmlLikePath, isHtmlContentType } from './content-type.js';
 
 export interface CrawlOptions {
   start: string;
@@ -9,6 +10,7 @@ export interface CrawlOptions {
   maxPages: number;
   isAllowed: (url: string) => boolean;
   exclude: string[];
+  onProgress?: (urlCount: number, latestUrl: string) => void;
 }
 
 export async function crawl(opts: CrawlOptions): Promise<string[]> {
@@ -29,18 +31,21 @@ export async function crawl(opts: CrawlOptions): Promise<string[]> {
     visited.add(url);
     if (!opts.isAllowed(url) || isExcluded(url)) continue;
     if (!url.startsWith(origin)) continue;
-
-    results.push(url);
-    if (depth >= opts.maxDepth) continue;
+    if (!hasHtmlLikePath(url)) continue;
 
     let html = '';
     try {
       const res = await opts.fetcher(url);
       if (!res.ok) continue;
+      if (!isHtmlContentType(res.headers.get('content-type'))) continue;
       html = await res.text();
     } catch {
       continue;
     }
+
+    results.push(url);
+    opts.onProgress?.(results.length, url);
+    if (depth >= opts.maxDepth) continue;
     const $ = cheerio.load(html);
     $('a[href]').each((_, el) => {
       const href = $(el).attr('href');

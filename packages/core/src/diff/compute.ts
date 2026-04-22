@@ -39,7 +39,7 @@ export async function computeDiff(
     }
 
     return {
-      pixelDiffPercent: diffPercent / 100,
+      pixelDiffPercent: diffPercent,
       diffPath,
     };
   } finally {

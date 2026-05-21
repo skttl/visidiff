@@ -1,0 +1,13 @@
+services:
+  visidiff:
+    build:
+      context: .
+      target: prod
+    ports:
+      - "3000:3000"
+    volumes:
+      - runs:/app/.output/public/runs
+    restart: unless-stopped
+
+volumes:
+  runs:

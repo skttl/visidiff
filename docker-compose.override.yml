@@ -1,0 +1,14 @@
+services:
+  visidiff:
+    build:
+      context: .
+      target: dev
+    command: npm run dev
+    ports:
+      - "3000:3000"
+    volumes:
+      - .:/app
+      - /app/node_modules
+      - runs:/app/public/runs
+    environment:
+      - HOST=0.0.0.0

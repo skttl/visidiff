@@ -11,6 +11,17 @@ Visual URL diff tool. Enter two direct URLs or switch to sitemap mode with two h
 7. Stream progress live over Server-Sent Events
 8. Group results by page and show side-by-side, overlay-slider and diff views
 
+## Screenshots
+
+**Settings — configure URLs, viewports and blocked globs**
+![Settings modal](docs/screenshots/01-settings-modal.png)
+
+**Live run in progress — streamed progress with ETA**
+![Running](docs/screenshots/04-running.png)
+
+**Results — side-by-side, overlay and diff views per viewport**
+![Results](docs/screenshots/05-results.png)
+
 ## Local development
 
 ```bash

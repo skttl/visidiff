@@ -8,7 +8,18 @@ export default <Config>{
     './app.vue'
   ],
   theme: {
-    extend: {}
+    extend: {
+      keyframes: {
+        'pdf-progress': {
+          '0%': { transform: 'translateX(-100%)' },
+          '50%': { transform: 'translateX(0%)' },
+          '100%': { transform: 'translateX(100%)' }
+        }
+      },
+      animation: {
+        'pdf-progress': 'pdf-progress 1.6s ease-in-out infinite'
+      }
+    }
   },
   plugins: []
 }

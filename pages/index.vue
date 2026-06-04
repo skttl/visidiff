@@ -1,973 +1,158 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
-import JobForm from '~/components/JobForm.vue'
-import ViewportResult from '~/components/ViewportResult.vue'
-
-interface ResultItem {
-  pagePath: string
-  pageLabel: string
-  urlA: string
-  urlB: string
-  width: number
-  percent: number
-  size: { width: number; height: number }
-  files: { a: string; b: string; diff: string }
-}
-
-interface PendingPageItem {
-  pagePath: string
-  pageLabel: string
-  urlA: string
-  urlB: string
-}
-
-interface CrawlLimits {
-  maxPages: number
-  maxDepth: number
-  timeoutMs: number
-}
-
-interface DirectPayload {
-  mode: 'direct'
-  urlA: string
-  urlB: string
-  viewports: number[]
-  blockedGlobs: string[]
-}
-
-interface SitemapPayload {
-  mode: 'sitemap'
-  hostA: string
-  hostB: string
-  viewports: number[]
-  blockedGlobs: string[]
-  crawlLimits: CrawlLimits
-}
-
-type RunPayload = DirectPayload | SitemapPayload
-
-const defaultTitle = 'VisiDiff'
-const submitting = ref(false)
-const jobId = ref<string | null>(null)
-const status = ref<'idle' | 'queued' | 'running' | 'done' | 'error' | 'cancelled'>('idle')
-const error = ref<string | null>(null)
-const events = ref<{ type: string; data: any; t: number }[]>([])
-const results = ref<ResultItem[]>([])
-const totalPercent = ref<number | null>(null)
-const submittedViewports = ref<number[]>([])
-const submittedBlockedGlobs = ref<string[]>([])
-const totalTasks = ref<number | null>(null)
-const compareLabel = ref<string | null>(null)
-const runStartedAt = ref<number | null>(null)
-const currentMode = ref<'direct' | 'sitemap'>('direct')
-const compareUrlA = ref<string | null>(null)
-const compareUrlB = ref<string | null>(null)
-const pendingPages = ref<PendingPageItem[]>([])
-const selectedViewportByPage = ref<Record<string, number>>({})
-const collapsedPages = ref<Record<string, boolean>>({})
-const settingsCollapsed = ref(false)
-const savedRunsOpen = ref(false)
-const rerunningPages = ref<Set<string>>(new Set())
-const headerScrolled = ref(false)
+const HISTORY_KEY = 'visidiff:history'
 
 interface SavedRunSummary {
   id: string
   savedAt: number
-  input: RunPayload
+  input: { mode: string; urlA?: string; urlB?: string; hostA?: string; hostB?: string; viewports: number[] }
   totalPercent: number | null
   resultCount: number
+  thumbnail: string | null
 }
 
+interface LocalHistoryEntry {
+  mode: 'direct' | 'sitemap'
+  urlA?: string
+  urlB?: string
+  hostA?: string
+  hostB?: string
+  viewports: number[]
+  savedAt: number
+}
+
+const localHistory = ref<LocalHistoryEntry[]>([])
 const savedRuns = ref<SavedRunSummary[]>([])
-const savedRunsLoading = ref(false)
-const savedRunsError = ref<string | null>(null)
-const loadingRunId = ref<string | null>(null)
 
-const defaultFaviconHref = '/favicon.svg'
-let faviconTimer: number | null = null
-let titleTimer: number | null = null
-
-let es: EventSource | null = null
-
-function ensureFaviconLink() {
-  let link = document.querySelector("link[rel='icon']") as HTMLLinkElement | null
-  if (!link) {
-    link = document.createElement('link')
-    link.rel = 'icon'
-    document.head.appendChild(link)
-  }
-  return link
-}
-
-function buildSpinnerFavicon(frame: number) {
-  const rotation = frame * 45
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-      <rect width="64" height="64" rx="14" fill="#020617"/>
-      <path d="M16 20h14v24H16z" fill="#22c55e" opacity="0.35"/>
-      <path d="M34 20h14v24H34z" fill="#38bdf8" opacity="0.35"/>
-      <g transform="translate(32 32) rotate(${rotation})">
-        <circle cx="0" cy="-18" r="5" fill="#f8fafc" opacity="1"/>
-        <circle cx="12.7" cy="-12.7" r="4.5" fill="#f8fafc" opacity="0.85"/>
-        <circle cx="18" cy="0" r="4" fill="#f8fafc" opacity="0.7"/>
-        <circle cx="12.7" cy="12.7" r="3.5" fill="#f8fafc" opacity="0.55"/>
-        <circle cx="0" cy="18" r="3" fill="#f8fafc" opacity="0.4"/>
-        <circle cx="-12.7" cy="12.7" r="2.5" fill="#f8fafc" opacity="0.3"/>
-        <circle cx="-18" cy="0" r="2" fill="#f8fafc" opacity="0.22"/>
-        <circle cx="-12.7" cy="-12.7" r="1.5" fill="#f8fafc" opacity="0.16"/>
-      </g>
-    </svg>
-  `.trim()
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
-}
-
-function startFaviconSpinner() {
-  stopFaviconSpinner()
-  let frame = 0
-  const link = ensureFaviconLink()
-  link.href = buildSpinnerFavicon(frame)
-  faviconTimer = window.setInterval(() => {
-    frame = (frame + 1) % 8
-    link.href = buildSpinnerFavicon(frame)
-  }, 150)
-}
-
-function stopFaviconSpinner() {
-  if (faviconTimer) {
-    window.clearInterval(faviconTimer)
-    faviconTimer = null
-  }
-  const link = ensureFaviconLink()
-  link.href = defaultFaviconHref
-}
-
-function startTitleTimer() {
-  stopTitleTimer()
-  titleTimer = window.setInterval(() => {
-    setDocumentTitle()
-  }, 1000)
-}
-
-function stopTitleTimer() {
-  if (titleTimer) {
-    window.clearInterval(titleTimer)
-    titleTimer = null
-  }
-}
-
-function formatEta(ms: number) {
-  const totalSeconds = Math.max(0, Math.round(ms / 1000))
-  const minutes = Math.floor(totalSeconds / 60)
-  const seconds = totalSeconds % 60
-  if (minutes <= 0) return `${seconds}s left`
-  if (minutes < 60) return `${minutes}m ${seconds}s left`
-  const hours = Math.floor(minutes / 60)
-  const remMinutes = minutes % 60
-  return `${hours}h ${remMinutes}m left`
-}
-
-function setDocumentTitle() {
-  if (status.value === 'queued') {
-    document.title = `[queued] ${defaultTitle}`
-    return
-  }
-
-  if (status.value === 'running') {
-    const latestStep = [...events.value].reverse().find((e) => e.type === 'step')
-    const phase = latestStep?.data?.phase ? ` ${latestStep.data.phase}` : ''
-    const percentComplete = getRunningPercent()
-    const eta = getEstimatedTimeLeft()
-    const etaLabel = eta !== null ? ` · ${formatEta(eta)}` : ''
-    document.title = submittedViewports.value.length > 0
-      ? `[${percentComplete}%]${phase}${etaLabel} · ${defaultTitle}`
-      : `[running]${phase} · ${defaultTitle}`
-    return
-  }
-
-  if (status.value === 'done') {
-    document.title = totalPercent.value !== null
-      ? `[${totalPercent.value.toFixed(2)}%] ${defaultTitle}`
-      : defaultTitle
-    return
-  }
-
-  if (status.value === 'error') {
-    document.title = `[error] ${defaultTitle}`
-    return
-  }
-
-  if (status.value === 'cancelled') {
-    document.title = `[cancelled] ${defaultTitle}`
-    return
-  }
-
-  document.title = defaultTitle
-}
-
-async function notifyDone(title: string, body: string) {
-  if (!('Notification' in window)) return
-  if (Notification.permission === 'default') {
-    const permission = await Notification.requestPermission()
-    if (permission !== 'granted') return
-  }
-  if (Notification.permission !== 'granted') return
-  new Notification(title, {
-    body,
-    icon: defaultFaviconHref,
-    badge: defaultFaviconHref,
-    tag: 'visidiff-run'
-  })
-}
-
-function getRunningPercent() {
-  const knownTotalTasks = totalTasks.value
-  if (knownTotalTasks && knownTotalTasks > 0) {
-    const complete = results.value.length
-    const runningStepCount = events.value.filter((evt) => evt.type === 'step' && typeof evt.data?.viewport === 'number').length
-    const partial = results.value.length === 0 && runningStepCount > 0 ? 0.05 : 0.35
-    const current = complete < knownTotalTasks ? complete + partial : complete
-    return Math.max(0, Math.min(100, Math.round((current / knownTotalTasks) * 100)))
-  }
-
-  const totalViewports = submittedViewports.value.length
-  if (!totalViewports) return 0
-
-  const phaseWeights: Record<string, number> = {
-    start: 0,
-    'capture-a': 2,
-    load: 8,
-    scroll: 18,
-    settle: 25,
-    shot: 33,
-    'capture-b': 36,
-    diff: 92
-  }
-
-  const perViewport = new Map<number, number>()
-
-  for (const width of submittedViewports.value) {
-    perViewport.set(width, 0)
-  }
-
-  for (const evt of events.value) {
-    if (evt.type === 'viewport-done' && typeof evt.data?.width === 'number') {
-      perViewport.set(evt.data.width, 100)
-      continue
-    }
-
-    if (evt.type !== 'step' || typeof evt.data?.viewport !== 'number') continue
-
-    const viewport = evt.data.viewport as number
-    const phase = String(evt.data.phase || '')
-    const side = evt.data.side ? String(evt.data.side) : ''
-
-    let weight = perViewport.get(viewport) ?? 0
-
-    if (phase === 'load' && side === 'b') weight = 44
-    else if (phase === 'scroll' && side === 'b') weight = 58
-    else if (phase === 'settle' && side === 'b') weight = 75
-    else if (phase === 'shot' && side === 'b') weight = 88
-    else if (phase in phaseWeights) weight = phaseWeights[phase]
-
-    perViewport.set(viewport, Math.max(perViewport.get(viewport) ?? 0, weight))
-  }
-
-  const total = Array.from(perViewport.values()).reduce((sum, value) => sum + value, 0)
-  return Math.max(0, Math.min(100, Math.round(total / totalViewports)))
-}
-
-function getEstimatedTimeLeft() {
-  if (!runStartedAt.value) return null
-  const progress = getRunningPercent()
-  if (progress <= 0 || progress >= 100) return null
-  const elapsed = Date.now() - runStartedAt.value
-  if (elapsed <= 0) return null
-  const estimatedTotal = elapsed / (progress / 100)
-  const remaining = estimatedTotal - elapsed
-  return remaining > 0 ? remaining : 0
-}
-
-const progressPercent = computed(() => {
-  if (status.value === 'done') return 100
-  if (status.value === 'error' || status.value === 'idle') return 0
-  return getRunningPercent()
-})
-
-const estimatedTimeLeft = computed(() => {
-  if (status.value !== 'running') return null
-  return getEstimatedTimeLeft()
-})
-
-const completedTasks = computed(() => results.value.length)
-
-type SortKey = 'runOrder' | 'title' | 'path' | 'diff' | 'viewports'
-const sortKey = ref<SortKey>('runOrder')
-const sortDir = ref<'asc' | 'desc'>('asc')
-
-function setSort(key: SortKey) {
-  if (sortKey.value === key) {
-    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
-  } else {
-    sortKey.value = key
-    sortDir.value = 'asc'
-  }
-}
-
-const pageRunOrder = computed(() => {
-  const order = new Map<string, number>()
-  let i = 0
-  for (const evt of events.value) {
-    if (evt.type === 'batch-ready' && Array.isArray(evt.data?.pages)) {
-      for (const p of evt.data.pages) {
-        if (!order.has(p.pagePath)) order.set(p.pagePath, i++)
+function loadLocalHistory() {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY)
+    if (raw) {
+      const data = JSON.parse(raw)
+      if (Array.isArray(data)) {
+        localHistory.value = data.slice(0, 5).map((item: any) => ({
+          mode: item.mode || 'direct',
+          urlA: item.urlA,
+          urlB: item.urlB,
+          hostA: item.hostA,
+          hostB: item.hostB,
+          viewports: Array.isArray(item.viewports) ? item.viewports : [],
+          savedAt: Number(item.savedAt) || 0
+        }))
       }
     }
-  }
-  for (const r of results.value) {
-    if (!order.has(r.pagePath)) order.set(r.pagePath, i++)
-  }
-  return order
-})
-
-const activePages = computed(() => {
-  const done = new Set(results.value.map(r => r.pagePath))
-  const started = new Set<string>()
-  for (const evt of events.value) {
-    if (evt.type === 'step' && evt.data?.pagePath) started.add(evt.data.pagePath)
-  }
-  const active = new Set<string>()
-  for (const p of started) {
-    if (!done.has(p)) active.add(p)
-  }
-  return active
-})
-
-const groupedResults = computed(() => {
-  const groups = new Map<string, { pagePath: string; pageLabel: string; urlA: string; urlB: string; results: ResultItem[]; averagePercent: number; isPending: boolean }>()
-
-  for (const page of pendingPages.value) {
-    groups.set(page.pagePath, {
-      pagePath: page.pagePath,
-      pageLabel: page.pageLabel,
-      urlA: page.urlA,
-      urlB: page.urlB,
-      results: [],
-      averagePercent: 0,
-      isPending: true
-    })
-  }
-
-  for (const result of results.value) {
-    const existing = groups.get(result.pagePath) || {
-      pagePath: result.pagePath,
-      pageLabel: result.pageLabel,
-      urlA: result.urlA,
-      urlB: result.urlB,
-      results: [],
-      averagePercent: 0,
-      isPending: false
-    }
-    existing.results.push(result)
-    existing.isPending = false
-    groups.set(result.pagePath, existing)
-  }
-
-  return Array.from(groups.values())
-    .map((group) => ({
-      ...group,
-      results: [...group.results].sort((a, b) => a.width - b.width),
-      averagePercent: group.results.reduce((sum, item) => sum + item.percent, 0) / Math.max(group.results.length, 1)
-    }))
-})
-
-const sortedGroups = computed(() => {
-  const order = pageRunOrder.value
-  const key = sortKey.value
-  const dir = sortDir.value === 'asc' ? 1 : -1
-  return [...groupedResults.value].sort((a, b) => {
-    let cmp = 0
-    if (key === 'runOrder') cmp = (order.get(a.pagePath) ?? 9999) - (order.get(b.pagePath) ?? 9999)
-    else if (key === 'title') cmp = a.pageLabel.localeCompare(b.pageLabel)
-    else if (key === 'path') cmp = a.pagePath.localeCompare(b.pagePath)
-    else if (key === 'diff') cmp = a.averagePercent - b.averagePercent
-    else if (key === 'viewports') cmp = a.results.length - b.results.length
-    return cmp * dir
-  })
-})
-
-watch(groupedResults, (groups) => {
-  const nextSelection: Record<string, number> = {}
-  const nextCollapsed: Record<string, boolean> = {}
-  for (const group of groups) {
-    const availableWidths = group.results.map(result => result.width)
-    const existing = selectedViewportByPage.value[group.pagePath]
-    if (availableWidths.length > 0) {
-      nextSelection[group.pagePath] = availableWidths.includes(existing) ? existing : availableWidths[0]
-    }
-    nextCollapsed[group.pagePath] = collapsedPages.value[group.pagePath] ?? currentMode.value === 'sitemap'
-  }
-  selectedViewportByPage.value = nextSelection
-  collapsedPages.value = nextCollapsed
-}, { immediate: true })
-
-function getSelectedResult(pagePath: string) {
-  const group = groupedResults.value.find(item => item.pagePath === pagePath)
-  if (!group) return null
-  const selectedWidth = selectedViewportByPage.value[pagePath]
-  return group.results.find(result => result.width === selectedWidth) || group.results[0] || null
+  } catch {}
 }
 
-function formatCompareUrl(url: string) {
-  try {
-    const parsed = new URL(url)
-    return `${parsed.host}${parsed.pathname}${parsed.search}`
-  } catch {
-    return url
-  }
-}
-
-function toExternalHref(url: string) {
-  try {
-    return new URL(url).toString()
-  } catch {
-    return `https://${url.replace(/^\/+/, '')}`
-  }
-}
-
-function togglePage(pagePath: string) {
-  collapsedPages.value[pagePath] = !collapsedPages.value[pagePath]
-}
-
-function toggleSettings() {
-  settingsCollapsed.value = !settingsCollapsed.value
-}
-
-async function openSavedRuns() {
-  savedRunsOpen.value = true
-  savedRunsError.value = null
-  savedRunsLoading.value = true
+async function loadSavedRunsSilent() {
   try {
     const res = await fetch('/api/saved-runs')
-    if (!res.ok) throw new Error('Failed to load saved runs')
-    savedRuns.value = await res.json() as SavedRunSummary[]
-  } catch (e: any) {
-    savedRunsError.value = e?.message || 'Failed to load saved runs'
-  } finally {
-    savedRunsLoading.value = false
-  }
+    if (res.ok) savedRuns.value = await res.json() as SavedRunSummary[]
+  } catch {}
 }
 
-async function loadSavedRun(id: string) {
-  loadingRunId.value = id
+function formatRunLabel(run: SavedRunSummary) {
+  const { input } = run
+  if (input.mode === 'sitemap') return `${input.hostA} ↔ ${input.hostB}`
   try {
-    const res = await fetch(`/api/saved-runs/${id}`)
-    if (!res.ok) throw new Error('Run not found')
-    const data = await res.json() as { id: string; savedAt: number; input: RunPayload; totalPercent: number | null; results: ResultItem[] }
-    jobId.value = data.id
-    status.value = 'done'
-    error.value = null
-    events.value = []
-    pendingPages.value = []
-    totalPercent.value = data.totalPercent ?? null
-    results.value = data.results
-    submittedViewports.value = data.input.viewports
-    submittedBlockedGlobs.value = data.input.blockedGlobs ?? []
-    totalTasks.value = data.results.length
-    currentMode.value = data.input.mode
-    compareUrlA.value = data.input.mode === 'sitemap' ? data.input.hostA : data.input.urlA
-    compareUrlB.value = data.input.mode === 'sitemap' ? data.input.hostB : data.input.urlB
-    compareLabel.value = data.input.mode === 'sitemap'
-      ? `${data.input.hostA} ↔ ${data.input.hostB}`
-      : `${data.input.urlA} ↔ ${data.input.urlB}`
-    selectedViewportByPage.value = {}
-    collapsedPages.value = {}
-    runStartedAt.value = null
-    savedRunsOpen.value = false
-    settingsCollapsed.value = true
-    setDocumentTitle()
-  } catch (e: any) {
-    savedRunsError.value = e?.message || 'Failed to load run'
-  } finally {
-    loadingRunId.value = null
-  }
+    const a = new URL(input.urlA ?? ''); const b = new URL(input.urlB ?? '')
+    return `${a.host}${a.pathname === '/' ? '' : a.pathname} ↔ ${b.host}${b.pathname === '/' ? '' : b.pathname}`
+  } catch { return `${input.urlA} ↔ ${input.urlB}` }
 }
 
-function formatSavedRunLabel(run: SavedRunSummary) {
-  const input = run.input
+function formatRunMeta(run: SavedRunSummary) {
+  const vp = run.input.viewports.join(', ')
+  const mode = run.input.mode === 'sitemap' ? 'Sitemap' : 'Direct'
   const date = run.savedAt ? new Date(run.savedAt).toLocaleString() : ''
-  const viewports = input.viewports.join(',')
-  if (input.mode === 'sitemap') {
-    return { label: `${input.hostA} ↔ ${input.hostB}`, meta: `Sitemap · ${viewports}px · ${run.resultCount} results · ${date}` }
-  }
-  return { label: `${formatCompareUrl(input.urlA)} ↔ ${formatCompareUrl(input.urlB)}`, meta: `Direct · ${viewports}px · ${run.resultCount} results · ${date}` }
-}
-
-async function onSubmit(payload: RunPayload) {
-  if (submitting.value) return
-  submitting.value = true
-  settingsCollapsed.value = true
-  error.value = null
-  events.value = []
-  results.value = []
-  pendingPages.value = []
-  totalPercent.value = null
-  status.value = 'queued'
-  submittedViewports.value = [...payload.viewports]
-  submittedBlockedGlobs.value = [...payload.blockedGlobs]
-  totalTasks.value = payload.mode === 'direct' ? payload.viewports.length : null
-  currentMode.value = payload.mode
-  compareUrlA.value = payload.mode === 'sitemap' ? payload.hostA : payload.urlA
-  compareUrlB.value = payload.mode === 'sitemap' ? payload.hostB : payload.urlB
-  selectedViewportByPage.value = {}
-  collapsedPages.value = {}
-  compareLabel.value = payload.mode === 'sitemap'
-    ? `${payload.hostA} ↔ ${payload.hostB}`
-    : `${payload.urlA} ↔ ${payload.urlB}`
-  runStartedAt.value = Date.now()
-  startFaviconSpinner()
-  startTitleTimer()
-  setDocumentTitle()
-  try {
-    const response = await fetch('/api/run', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-    if (!response.ok) {
-      const data = await response.json().catch(() => null)
-      throw new Error(data?.statusMessage || 'Failed to start job')
-    }
-    const res = await response.json() as { id: string }
-    jobId.value = res.id
-    openStream(res.id)
-  } catch (e: any) {
-    error.value = e?.data?.statusMessage || e?.message || 'Failed to start job'
-    status.value = 'error'
-    submitting.value = false
-    stopFaviconSpinner()
-    stopTitleTimer()
-    setDocumentTitle()
-  }
-}
-
-async function cancelRun() {
-  if (!jobId.value) return
-  try {
-    await fetch(`/api/cancel/${jobId.value}`, { method: 'POST' })
-  } catch {}
-}
-
-async function rerunPage(pagePath: string, urlA: string, urlB: string) {
-  if (rerunningPages.value.has(pagePath)) return
-  rerunningPages.value = new Set([...rerunningPages.value, pagePath])
-
-  const payload: DirectPayload = {
-    mode: 'direct',
-    urlA,
-    urlB,
-    viewports: submittedViewports.value,
-    blockedGlobs: submittedBlockedGlobs.value
-  }
-
-  try {
-    const response = await fetch('/api/run', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-    if (!response.ok) throw new Error('Failed to start re-run')
-    const { id } = await response.json() as { id: string }
-
-    await new Promise<void>((resolve) => {
-      const pageEs = new EventSource(`/api/events/${id}`)
-      pageEs.addEventListener('viewport-done', (ev) => {
-        const data = JSON.parse((ev as MessageEvent).data) as ResultItem
-        const incoming = { ...data, pagePath }
-        results.value = [
-          ...results.value.filter(r => r.pagePath !== pagePath),
-          incoming
-        ]
-      })
-      pageEs.addEventListener('done', () => { pageEs.close(); resolve() })
-      pageEs.addEventListener('error', () => { pageEs.close(); resolve() })
-      pageEs.addEventListener('close', () => { pageEs.close(); resolve() })
-    })
-  } catch {}
-
-  rerunningPages.value = new Set([...rerunningPages.value].filter(p => p !== pagePath))
-}
-
-function openStream(id: string) {
-  if (es) es.close()
-  es = new EventSource(`/api/events/${id}`)
-  es.addEventListener('status', (ev) => {
-    const data = JSON.parse((ev as MessageEvent).data)
-    if (data.status) status.value = data.status
-    if (data.status === 'cancelled') {
-      submitting.value = false
-      stopFaviconSpinner()
-      stopTitleTimer()
-      setDocumentTitle()
-    }
-    if (data.error) error.value = data.error
-    events.value.push({ type: 'status', data, t: Date.now() })
-    setDocumentTitle()
-  })
-  es.addEventListener('step', (ev) => {
-    const data = JSON.parse((ev as MessageEvent).data)
-    events.value.push({ type: 'step', data, t: Date.now() })
-    if (status.value === 'queued') status.value = 'running'
-    setDocumentTitle()
-  })
-  es.addEventListener('batch-ready', (ev) => {
-    const data = JSON.parse((ev as MessageEvent).data)
-    if (typeof data.taskCount === 'number') totalTasks.value = data.taskCount
-    if (Array.isArray(data.pages)) pendingPages.value = data.pages
-    events.value.push({ type: 'batch-ready', data, t: Date.now() })
-    setDocumentTitle()
-  })
-  es.addEventListener('viewport-done', (ev) => {
-    const data = JSON.parse((ev as MessageEvent).data) as ResultItem
-    results.value.push(data)
-    pendingPages.value = pendingPages.value.filter(page => page.pagePath !== data.pagePath)
-    events.value.push({ type: 'viewport-done', data, t: Date.now() })
-    setDocumentTitle()
-  })
-  es.addEventListener('page-skipped', (ev) => {
-    const data = JSON.parse((ev as MessageEvent).data)
-    pendingPages.value = pendingPages.value.filter(page => page.pagePath !== data.pagePath)
-    events.value.push({ type: 'page-skipped', data, t: Date.now() })
-    setDocumentTitle()
-  })
-  es.addEventListener('done', (ev) => {
-    const data = JSON.parse((ev as MessageEvent).data)
-    totalPercent.value = data.totalPercent ?? null
-    status.value = 'done'
-    submitting.value = false
-    events.value.push({ type: 'done', data, t: Date.now() })
-    stopFaviconSpinner()
-    stopTitleTimer()
-    setDocumentTitle()
-    void notifyDone('VisiDiff run complete', `Overall difference: ${(data.totalPercent ?? 0).toFixed(2)}%`)
-  })
-  es.addEventListener('error', (ev) => {
-    const raw = (ev as MessageEvent).data
-    if (raw) {
-      try {
-        const data = JSON.parse(raw)
-        error.value = data.message || 'Error'
-      } catch {
-        error.value = 'Stream error'
-      }
-    }
-    stopFaviconSpinner()
-    stopTitleTimer()
-    submitting.value = false
-    status.value = 'error'
-    setDocumentTitle()
-    void notifyDone('VisiDiff run failed', error.value || 'The visual diff run failed.')
-  })
-  es.addEventListener('close', () => {
-    es?.close()
-    es = null
-    submitting.value = false
-  })
-}
-
-function onWindowScroll() {
-  headerScrolled.value = window.scrollY > 8
+  return `${mode} · ${vp}px · ${run.resultCount} results · ${date}`
 }
 
 onMounted(() => {
-  stopFaviconSpinner()
-  stopTitleTimer()
-  setDocumentTitle()
-  window.addEventListener('scroll', onWindowScroll, { passive: true })
+  loadLocalHistory()
+  void loadSavedRunsSilent()
 })
+</script>
 
-onBeforeUnmount(() => {
-  stopFaviconSpinner()
-  stopTitleTimer()
-  document.title = defaultTitle
-  es?.close()
-  window.removeEventListener('scroll', onWindowScroll)
-})
-
- </script>
-
- <template>
-  <main data-testid="page" class="relative min-h-screen px-4 py-4 sm:px-6 lg:px-8">
-    <header data-testid="header" class="sticky top-4 z-20 rounded-[1.5rem] border border-slate-800/80 bg-slate-900/75 px-5 py-4 backdrop-blur-xl transition-shadow duration-300" :class="headerScrolled ? 'shadow-[0_8px_32px_-4px_rgba(0,0,0,0.7),0_0_0_1px_rgba(148,163,184,0.08)]' : 'shadow-2xl shadow-black/20'">
-        <div class="flex items-start justify-between gap-4">
-          <div class="min-w-0">
-            <p v-if="compareLabel && compareUrlA && compareUrlB" class="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500">
-              <a :href="toExternalHref(compareUrlA)" target="_blank" rel="noopener noreferrer" class="max-w-full truncate text-sky-400 hover:text-sky-300 hover:underline">
-                {{ formatCompareUrl(compareUrlA) }}
-              </a>
-              <span>↔</span>
-              <a :href="toExternalHref(compareUrlB)" target="_blank" rel="noopener noreferrer" class="max-w-full truncate text-sky-400 hover:text-sky-300 hover:underline">
-                {{ formatCompareUrl(compareUrlB) }}
-              </a>
-            </p>
-          </div>
-          <div class="flex shrink-0 items-center gap-2 pt-1">
-            <button data-testid="btn-saved-runs" type="button" class="rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-1.5 text-xs text-slate-300 transition hover:border-slate-700 hover:bg-slate-800" @click="openSavedRuns">
-              Saved runs
-            </button>
-            <button data-testid="btn-settings" type="button" class="rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-1.5 text-xs text-slate-300 transition hover:border-slate-700 hover:bg-slate-800" @click="toggleSettings">
-              Settings
-            </button>
-          </div>
+<template>
+  <main class="mt-6">
+    <div class="rounded-[1.75rem] border border-dashed border-slate-800/80 bg-slate-900/45 shadow-inner shadow-black/20 backdrop-blur-sm">
+      <div class="px-8 py-12 text-center">
+        <div class="text-base font-semibold text-slate-200">Visual regression, simplified</div>
+        <p class="mt-2 text-sm text-slate-500">Compare two URLs or crawl an entire site across multiple viewport widths.</p>
+        <div class="mt-6 flex flex-wrap justify-center gap-3">
+          <NuxtLink
+            to="/settings"
+            class="rounded-2xl bg-emerald-500 px-5 py-2.5 text-sm font-medium text-slate-950 shadow-lg shadow-emerald-950/30 transition hover:bg-emerald-400"
+          >
+            New run
+          </NuxtLink>
+          <NuxtLink
+            to="/runs"
+            class="rounded-2xl border border-slate-700 bg-slate-800/70 px-5 py-2.5 text-sm font-medium text-slate-200 transition hover:border-slate-600 hover:bg-slate-700"
+          >
+            Saved runs
+          </NuxtLink>
         </div>
-        <div class="mt-4 flex flex-wrap gap-3">
-          <div data-testid="stat-run-state" class="rounded-2xl border border-slate-800/80 bg-slate-950/70 px-4 py-3">
-            <div class="text-[11px] uppercase tracking-[0.18em] text-slate-500">Run state</div>
-            <div data-testid="run-status" class="mt-2 text-sm font-medium capitalize text-slate-200">{{ status }}</div>
-          </div>
-          <div data-testid="stat-overall-diff" class="rounded-2xl border border-slate-800/80 bg-slate-950/70 px-4 py-3">
-            <div class="text-[11px] uppercase tracking-[0.18em] text-slate-500">Overall difference</div>
-            <div v-if="totalPercent !== null" data-testid="overall-diff-value" class="mt-2 text-2xl font-semibold" :class="totalPercent < 1 ? 'text-emerald-400' : totalPercent < 5 ? 'text-amber-400' : 'text-rose-400'">
-              {{ totalPercent.toFixed(2) }}%
-            </div>
-            <div v-else class="mt-2 text-sm text-slate-500">No completed run yet</div>
-          </div>
-          <div v-if="jobId && status !== 'done' && status !== 'cancelled'" data-testid="stat-run-progress" class="min-w-[16rem] flex-1 rounded-2xl border border-slate-800/80 bg-slate-950/70 px-4 py-3">
-            <div class="mb-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-sm">
-              <div class="flex flex-wrap items-center gap-3">
-                <span class="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-[0.18em] text-slate-500">
-                  <svg v-if="status === 'running'" class="size-3 animate-spin" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                  Run progress
-                </span>
-                <span data-testid="progress-percent" class="text-slate-400">{{ progressPercent }}%</span>
-                <span v-if="totalTasks" data-testid="progress-tasks" class="text-slate-500 text-xs">{{ completedTasks }}/{{ totalTasks }}</span>
-              </div>
-              <div class="flex items-center gap-3">
-                <span v-if="estimatedTimeLeft !== null" data-testid="progress-eta" class="text-xs text-slate-400">ETA {{ formatEta(estimatedTimeLeft) }}</span>
-                <span v-else-if="status === 'queued'" class="text-xs text-slate-400">Waiting to start</span>
-                <button
-                  v-if="status === 'queued' || status === 'running'"
-                  data-testid="btn-cancel"
-                  type="button"
-                  class="rounded-xl border border-rose-500/40 bg-rose-950/60 px-3 py-1.5 text-xs font-medium text-rose-300 transition hover:border-rose-400/60 hover:bg-rose-900/60 hover:text-rose-200"
-                  @click="cancelRun"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-            <div data-testid="progress-bar-track" class="h-2.5 overflow-hidden rounded-full bg-slate-800/90">
-              <div data-testid="progress-bar-fill" class="h-full rounded-full bg-emerald-400 transition-all duration-300" :style="{ width: `${progressPercent}%` }" />
-            </div>
-          </div>
+      </div>
+
+      <div v-if="localHistory.length || savedRuns.length" class="grid gap-4 border-t border-slate-800/60 px-6 py-6 sm:grid-cols-2">
+        <div v-if="localHistory.length">
+          <div class="mb-3 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500">Recent settings</div>
+          <ul class="space-y-2">
+            <li
+              v-for="(entry, i) in localHistory"
+              :key="i"
+              class="flex cursor-pointer items-center justify-between gap-3 rounded-2xl border border-slate-800/80 bg-slate-950/60 px-4 py-3 transition hover:border-slate-700 hover:bg-slate-900"
+            >
+              <NuxtLink to="/settings" class="min-w-0 flex-1">
+                <div class="truncate text-xs font-medium text-slate-200">
+                  <span v-if="entry.mode === 'sitemap'">{{ entry.hostA }} ↔ {{ entry.hostB }}</span>
+                  <span v-else>{{ entry.urlA }} ↔ {{ entry.urlB }}</span>
+                </div>
+                <div class="mt-0.5 text-[11px] text-slate-500">
+                  {{ entry.mode === 'sitemap' ? 'Sitemap' : 'Direct' }} · {{ entry.viewports.join(', ') }}px
+                  <span v-if="entry.savedAt"> · {{ new Date(entry.savedAt).toLocaleDateString() }}</span>
+                </div>
+              </NuxtLink>
+              <svg class="size-3.5 shrink-0 text-slate-600" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd"/></svg>
+            </li>
+          </ul>
         </div>
-    </header>
 
-    <div class="mt-4">
-
-      <Teleport to="body">
-        <div
-          v-if="!settingsCollapsed"
-          data-testid="modal-settings"
-          class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4 py-8 sm:py-12"
-        >
-          <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="toggleSettings" />
-          <div class="relative w-full max-w-2xl rounded-[1.5rem] border border-slate-800/80 bg-slate-900 shadow-2xl shadow-black/40">
-            <div class="flex items-center justify-between gap-3 px-5 py-4">
-              <div>
-                <h2 class="text-sm font-semibold text-slate-100">Settings</h2>
-                <p class="text-xs text-slate-500">Configure targets, viewports, and crawl limits.</p>
+        <div v-if="savedRuns.length">
+          <div class="mb-3 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500">Recent saved runs</div>
+          <ul class="space-y-2">
+            <li
+              v-for="run in savedRuns.slice(0, 5)"
+              :key="run.id"
+              class="flex cursor-pointer items-center justify-between gap-3 rounded-2xl border border-slate-800/80 bg-slate-950/60 px-4 py-3 transition hover:border-slate-700 hover:bg-slate-900"
+            >
+              <NuxtLink :to="`/runs/${run.id}`" class="flex min-w-0 flex-1 items-center gap-3">
+                <img v-if="run.thumbnail" :src="run.thumbnail" class="size-8 shrink-0 rounded-md object-cover" />
+                <div v-else class="size-8 shrink-0 rounded-md bg-slate-800" />
+                <div class="min-w-0">
+                  <div class="truncate text-xs font-medium text-slate-200">{{ formatRunLabel(run) }}</div>
+                  <div class="mt-0.5 truncate text-[11px] text-slate-500">{{ formatRunMeta(run) }}</div>
+                </div>
+              </NuxtLink>
+              <div class="flex shrink-0 items-center gap-2">
+                <span
+                  v-if="run.totalPercent !== null"
+                  class="text-xs font-semibold tabular-nums"
+                  :class="run.totalPercent < 1 ? 'text-emerald-400' : run.totalPercent < 5 ? 'text-amber-400' : 'text-rose-400'"
+                >{{ run.totalPercent.toFixed(2) }}%</span>
+                <svg class="size-3.5 shrink-0 text-slate-600" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd"/></svg>
               </div>
-              <button
-                type="button"
-                class="rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-1.5 text-xs text-slate-300 transition hover:border-slate-700 hover:bg-slate-800"
-                @click="toggleSettings"
-              >
-                Close
-              </button>
-            </div>
-            <div class="border-t border-slate-800/80 px-3 py-3">
-              <JobForm :submitting="submitting" @submit="onSubmit" />
-            </div>
-          </div>
+            </li>
+          </ul>
+          <NuxtLink
+            v-if="savedRuns.length > 5"
+            to="/runs"
+            class="mt-2 block w-full rounded-2xl border border-slate-800/80 bg-slate-950/40 px-4 py-2 text-center text-xs text-slate-400 transition hover:border-slate-700 hover:bg-slate-900 hover:text-slate-300"
+          >
+            View all {{ savedRuns.length }} saved runs
+          </NuxtLink>
         </div>
-      </Teleport>
-
-      <Teleport to="body">
-        <div
-          v-if="savedRunsOpen"
-          data-testid="modal-saved-runs"
-          class="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto px-4 py-8 sm:py-12"
-        >
-          <div class="absolute inset-0 bg-black/60 backdrop-blur-sm" @click="savedRunsOpen = false" />
-          <div class="relative w-full max-w-2xl rounded-[1.5rem] border border-slate-800/80 bg-slate-900 shadow-2xl shadow-black/40">
-            <div class="flex items-center justify-between gap-3 px-5 py-4">
-              <div>
-                <h2 class="text-sm font-semibold text-slate-100">Saved runs</h2>
-                <p class="text-xs text-slate-500">Completed runs saved on disk. Click a run to restore it.</p>
-              </div>
-              <button
-                type="button"
-                class="rounded-xl border border-slate-800/80 bg-slate-950/70 px-3 py-1.5 text-xs text-slate-300 transition hover:border-slate-700 hover:bg-slate-800"
-                @click="savedRunsOpen = false"
-              >
-                Close
-              </button>
-            </div>
-            <div class="border-t border-slate-800/80 px-4 py-4">
-              <div v-if="savedRunsLoading" class="py-8 text-center text-sm text-slate-400">Loading…</div>
-              <div v-else-if="savedRunsError" class="rounded-2xl border border-rose-500/30 bg-rose-950/50 px-4 py-3 text-sm text-rose-200">{{ savedRunsError }}</div>
-              <div v-else-if="!savedRuns.length" class="py-8 text-center text-sm text-slate-500">No saved runs yet. Completed runs will appear here.</div>
-              <ul v-else class="space-y-2">
-                <li
-                  v-for="run in savedRuns"
-                  :key="run.id"
-                  class="flex items-center justify-between gap-4 rounded-2xl border border-slate-800/80 bg-slate-950/70 px-4 py-3"
-                >
-                  <div class="min-w-0 flex-1">
-                    <div class="truncate text-sm font-medium text-slate-200">{{ formatSavedRunLabel(run).label }}</div>
-                    <div class="mt-0.5 truncate text-xs text-slate-500">{{ formatSavedRunLabel(run).meta }}</div>
-                  </div>
-                  <div class="flex shrink-0 items-center gap-3">
-                    <span
-                      v-if="run.totalPercent !== null"
-                      class="text-sm font-semibold"
-                      :class="run.totalPercent < 1 ? 'text-emerald-400' : run.totalPercent < 5 ? 'text-amber-400' : 'text-rose-400'"
-                    >
-                      {{ run.totalPercent.toFixed(2) }}%
-                    </span>
-                    <button
-                      type="button"
-                      :disabled="loadingRunId === run.id"
-                      class="rounded-xl border border-slate-800/80 bg-slate-800 px-3 py-1.5 text-xs text-slate-200 transition hover:border-slate-700 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                      @click="loadSavedRun(run.id)"
-                    >
-                      {{ loadingRunId === run.id ? 'Loading…' : 'Load' }}
-                    </button>
-                  </div>
-                </li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      </Teleport>
-
-      <div class="min-h-0 flex-1">
-        <section class="space-y-4">
-          <div v-if="error" data-testid="error-banner" class="rounded-2xl border border-rose-500/30 bg-rose-950/50 px-4 py-3 text-sm text-rose-200 shadow-lg shadow-rose-950/10 backdrop-blur-sm">
-            {{ error }}
-          </div>
-
-          <div v-if="!groupedResults.length" data-testid="empty-state" class="flex min-h-[26rem] items-center justify-center rounded-[1.75rem] border border-dashed border-slate-800/80 bg-slate-900/45 px-8 text-center shadow-inner shadow-black/20 backdrop-blur-sm">
-            <div class="max-w-xl">
-              <div class="text-sm font-medium text-slate-200">No comparison loaded</div>
-              <p class="mt-2 text-sm text-slate-500">Open Settings and start a run to fill this workspace with viewport results, overlays, and diff previews.</p>
-            </div>
-          </div>
-
-          <section v-if="groupedResults.length" data-testid="results-table" class="overflow-hidden rounded-[1.5rem] border border-slate-800/80 bg-slate-900/65 shadow-2xl shadow-black/20 backdrop-blur-xl">
-            <table class="w-full table-fixed border-collapse text-sm">
-              <colgroup>
-                <col class="w-[4%]" />
-                <col class="w-[26%]" />
-                <col class="w-[20%]" />
-                <col class="w-[12%]" />
-                <col class="w-[10%]" />
-                <col />
-              </colgroup>
-              <thead>
-                <tr class="border-b border-slate-800/80">
-                  <th class="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-widest"><button type="button" class="flex items-center gap-1 transition" :class="sortKey === 'runOrder' ? 'text-slate-300' : 'text-slate-500 hover:text-slate-400'" @click="setSort('runOrder')">#<span class="text-[10px]">{{ sortKey === 'runOrder' ? (sortDir === 'asc' ? '↑' : '↓') : '' }}</span></button></th>
-                  <th class="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-widest"><button type="button" class="flex items-center gap-1 transition" :class="sortKey === 'title' ? 'text-slate-300' : 'text-slate-500 hover:text-slate-400'" @click="setSort('title')">Title<span class="text-[10px]">{{ sortKey === 'title' ? (sortDir === 'asc' ? '↑' : '↓') : '' }}</span></button></th>
-                  <th class="px-4 py-2.5 text-left text-[11px] font-medium uppercase tracking-widest"><button type="button" class="flex items-center gap-1 transition" :class="sortKey === 'path' ? 'text-slate-300' : 'text-slate-500 hover:text-slate-400'" @click="setSort('path')">Path<span class="text-[10px]">{{ sortKey === 'path' ? (sortDir === 'asc' ? '↑' : '↓') : '' }}</span></button></th>
-                  <th class="px-4 py-2.5 text-right text-[11px] font-medium uppercase tracking-widest"><button type="button" class="ml-auto flex items-center gap-1 transition" :class="sortKey === 'diff' ? 'text-slate-300' : 'text-slate-500 hover:text-slate-400'" @click="setSort('diff')">Avg. diff<span class="text-[10px]">{{ sortKey === 'diff' ? (sortDir === 'asc' ? '↑' : '↓') : '' }}</span></button></th>
-                  <th class="px-4 py-2.5 text-right text-[11px] font-medium uppercase tracking-widest"><button type="button" class="ml-auto flex items-center gap-1 transition" :class="sortKey === 'viewports' ? 'text-slate-300' : 'text-slate-500 hover:text-slate-400'" @click="setSort('viewports')">Viewports<span class="text-[10px]">{{ sortKey === 'viewports' ? (sortDir === 'asc' ? '↑' : '↓') : '' }}</span></button></th>
-                  <th class="px-4 py-2.5"></th>
-                </tr>
-              </thead>
-              <tbody>
-                <template v-for="(group, idx) in sortedGroups" :key="group.pagePath">
-                  <tr
-                    :data-testid="`result-row-${group.pagePath}`"
-                    class="cursor-pointer border-b border-slate-800/60 transition-colors hover:bg-slate-800/30"
-                    :class="{ 'bg-slate-800/20': !collapsedPages[group.pagePath] }"
-                    @click="togglePage(group.pagePath)"
-                  >
-                    <td class="px-4 py-3 tabular-nums text-slate-500 text-xs">{{ (pageRunOrder.get(group.pagePath) ?? idx) + 1 }}</td>
-                    <td class="px-4 py-3 font-medium">
-                      <span v-if="!group.isPending" class="text-slate-100">{{ group.pageLabel }}</span>
-                      <span v-else-if="activePages.has(group.pagePath)" class="inline-flex items-center gap-1.5 text-slate-400">
-                        <svg class="size-3.5 animate-spin" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                        <span class="truncate">{{ group.pageLabel }}</span>
-                      </span>
-                      <span v-else class="inline-flex items-center gap-1.5 text-slate-500">
-                        <svg class="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" stroke-dasharray="4 3"/></svg>
-                        <span class="truncate">{{ group.pageLabel }}</span>
-                      </span>
-                    </td>
-                    <td class="px-4 py-3 font-mono text-xs text-slate-400 truncate">{{ group.pagePath }}</td>
-                    <td class="px-4 py-3 text-right tabular-nums">
-                      <span v-if="group.isPending" class="text-slate-500">—</span>
-                      <span v-else :class="group.averagePercent < 1 ? 'text-emerald-400' : group.averagePercent < 5 ? 'text-amber-400' : 'text-rose-400'">
-                        {{ group.averagePercent.toFixed(2) }}%
-                      </span>
-                    </td>
-                    <td class="px-4 py-3 text-right tabular-nums text-slate-300">
-                      {{ group.isPending ? '—' : group.results.length }}
-                    </td>
-                    <td class="px-4 py-3">
-                      <div class="flex items-center justify-end">
-                        <svg class="size-4 text-slate-400 transition-transform" :class="{ 'rotate-180': !collapsedPages[group.pagePath] }" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd"/></svg>
-                      </div>
-                    </td>
-                  </tr>
-                  <Transition name="row-expand">
-                  <tr v-if="!collapsedPages[group.pagePath]">
-                    <td colspan="6" class="border-b border-slate-800/60 bg-slate-950/40"><div class="row-expand-inner px-5 py-5">
-                      <div v-if="group.isPending && !group.results.length" class="rounded-2xl border border-dashed border-slate-800/80 bg-slate-950/50 px-4 py-6 text-sm text-slate-400">
-                        Found in discovery. Waiting to start viewport screenshots.
-                      </div>
-                      <div v-if="currentMode === 'sitemap'" class="mb-4 flex justify-end">
-                        <button
-                          type="button"
-                          :disabled="rerunningPages.has(group.pagePath)"
-                          class="rounded-lg border border-slate-700/60 bg-slate-800/60 px-2.5 py-1 text-xs text-slate-300 transition hover:border-slate-600 hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
-                          @click="rerunPage(group.pagePath, group.urlA, group.urlB)"
-                        >
-                          <span v-if="rerunningPages.has(group.pagePath)" class="inline-flex items-center gap-1">
-                            <svg class="size-3 animate-spin" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
-                            Re-running
-                          </span>
-                          <span v-else>Re-run</span>
-                        </button>
-                      </div>
-                      <div v-if="group.results.length > 1" class="mb-4 inline-flex flex-wrap overflow-hidden rounded-xl border border-slate-800/80 bg-slate-950/70 p-1 text-sm shadow-inner shadow-black/20">
-                        <button
-                          v-for="result in group.results"
-                          :key="`${group.pagePath}-tab-${result.width}`"
-                          type="button"
-                          class="rounded-lg px-3 py-1.5 transition"
-                          :class="selectedViewportByPage[group.pagePath] === result.width ? 'bg-slate-700 text-white shadow-sm shadow-black/30' : 'text-slate-300 hover:bg-slate-800'"
-                          @click="selectedViewportByPage[group.pagePath] = result.width"
-                        >
-                          {{ result.width }}px
-                        </button>
-                      </div>
-                      <ViewportResult
-                        v-if="getSelectedResult(group.pagePath)"
-                        :key="`${group.pagePath}-${selectedViewportByPage[group.pagePath]}`"
-                        :result="getSelectedResult(group.pagePath)!"
-                        :url-a="group.urlA"
-                        :url-b="group.urlB"
-                      />
-                    </div></td>
-                  </tr>
-                  </Transition>
-                </template>
-              </tbody>
-            </table>
-          </section>
-        </section>
       </div>
     </div>
   </main>
- </template>
+</template>

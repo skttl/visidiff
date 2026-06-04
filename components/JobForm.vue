@@ -37,6 +37,8 @@ const MAX_HISTORY = 50
 const DEFAULT_VIEWPORTS = [375, 768, 1440]
 const DEFAULT_BLOCKED = ['**/*cookie*', '**/*consent*', '**/*onetrust*', '**/*cookiebot*', 'https://policy.app.cookieinformation.com/*']
 const DEFAULT_LIMITS: CrawlLimits = { maxPages: 25, maxDepth: 2, timeoutMs: 15000 }
+
+
 const DEFAULT_PAGE_CONCURRENCY = 3
 
 interface DirectSavedSettings {
@@ -75,7 +77,7 @@ const timeoutMs = ref(DEFAULT_LIMITS.timeoutMs)
 const pageConcurrency = ref(DEFAULT_PAGE_CONCURRENCY)
 
 const history = ref<SavedSettings[]>([])
-const selectedIndex = ref<number | ''>('')
+const historyOpen = ref(false)
 
 function loadHistory(): SavedSettings[] {
   try {
@@ -184,14 +186,9 @@ function applyEntry(entry: SavedSettings) {
   blockedGlobsText.value = (entry.blockedGlobs || DEFAULT_BLOCKED).join('\n')
 }
 
-function onPickHistory(e: Event) {
-  const v = (e.target as HTMLSelectElement).value
-  if (v === '') return
-  const idx = Number(v)
-  const entry = history.value[idx]
-  if (entry) applyEntry(entry)
-  // reset to placeholder so picking the same entry again still applies
-  selectedIndex.value = ''
+function pickHistory(entry: SavedSettings) {
+  applyEntry(entry)
+  historyOpen.value = false
 }
 
 function clearHistory() {
@@ -210,12 +207,20 @@ function shortUrl(u: string) {
   }
 }
 
-function labelFor(entry: SavedSettings) {
-  const date = entry.savedAt ? new Date(entry.savedAt).toLocaleString() : ''
-  if (entry.mode === 'sitemap') {
-    return `[SITEMAP] ${entry.hostA} ↔ ${entry.hostB} · ${entry.viewports.join(',')}px${date ? ' · ' + date : ''}`
-  }
-  return `[DIRECT URLS] ${shortUrl(entry.urlA)} ↔ ${shortUrl(entry.urlB)} · ${entry.viewports.join(',')}px${date ? ' · ' + date : ''}`
+function entryTargets(entry: SavedSettings) {
+  if (entry.mode === 'sitemap') return { a: entry.hostA, b: entry.hostB }
+  return { a: shortUrl(entry.urlA), b: shortUrl(entry.urlB) }
+}
+
+function entryDate(entry: SavedSettings) {
+  if (!entry.savedAt) return ''
+  const d = new Date(entry.savedAt)
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+}
+
+function entryTime(entry: SavedSettings) {
+  if (!entry.savedAt) return ''
+  return new Date(entry.savedAt).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 }
 
 function addViewport() {
@@ -273,30 +278,56 @@ const canSubmit = computed(() => {
 </script>
 
 <template>
-  <div
-    v-if="history.length"
-    class="mb-4 flex flex-wrap items-center gap-3 rounded-2xl border border-slate-800/80 bg-slate-950/70 px-4 py-3 text-sm shadow-inner shadow-black/20"
-  >
-    <label class="flex flex-1 items-center gap-2 min-w-0">
-      <span class="whitespace-nowrap text-slate-300">Previous settings</span>
-      <select
-        :value="selectedIndex"
-        class="min-w-0 flex-1 rounded-xl border border-slate-800/80 bg-slate-900 px-3 py-2 text-slate-100 outline-none transition focus:border-sky-400/60 focus:bg-slate-950"
-        @change="onPickHistory"
-      >
-        <option value="">Load previous settings… ({{ history.length }})</option>
-        <option v-for="(entry, i) in history" :key="i" :value="i">
-          {{ labelFor(entry) }}
-        </option>
-      </select>
-    </label>
+  <div v-if="history.length" class="mb-4 rounded-2xl border border-slate-800/80 bg-slate-950/70 shadow-inner shadow-black/20">
     <button
       type="button"
-      class="rounded-xl border border-slate-800/80 bg-slate-900 px-3 py-2 text-xs text-slate-400 transition hover:border-rose-500/30 hover:bg-slate-800 hover:text-rose-300"
-      @click="clearHistory"
+      class="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+      @click="historyOpen = !historyOpen"
     >
-      Clear history
+      <div class="flex items-center gap-2.5 min-w-0">
+        <svg class="size-3.5 shrink-0 text-slate-500" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 1 0 0-16 8 8 0 0 0 0 16Zm.75-13a.75.75 0 0 0-1.5 0v5c0 .414.336.75.75.75h3.25a.75.75 0 0 0 0-1.5h-2.5V5Z" clip-rule="evenodd"/></svg>
+        <span class="text-sm text-slate-300">Previous settings</span>
+        <span class="rounded-full bg-slate-800 px-2 py-0.5 text-[11px] tabular-nums text-slate-400">{{ history.length }}</span>
+      </div>
+      <div class="flex shrink-0 items-center gap-3">
+        <button
+          type="button"
+          class="rounded-lg px-2.5 py-1 text-xs text-slate-500 transition hover:text-rose-400"
+          @click.stop="clearHistory"
+        >
+          Clear
+        </button>
+        <svg class="size-4 text-slate-500 transition-transform duration-200" :class="historyOpen ? 'rotate-180' : ''" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.22 8.22a.75.75 0 0 1 1.06 0L10 11.94l3.72-3.72a.75.75 0 1 1 1.06 1.06l-4.25 4.25a.75.75 0 0 1-1.06 0L5.22 9.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd"/></svg>
+      </div>
     </button>
+
+    <div v-if="historyOpen" class="border-t border-slate-800/60 px-2 pb-2 pt-1">
+      <ul class="max-h-72 overflow-y-auto space-y-1 pr-0.5">
+        <li
+          v-for="(entry, i) in history"
+          :key="i"
+          class="group flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 transition hover:bg-slate-800/70"
+          @click="pickHistory(entry)"
+        >
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+              <span class="truncate text-xs font-medium text-slate-200">{{ entryTargets(entry).a }}</span>
+              <span class="text-[10px] text-slate-600">↔</span>
+              <span class="truncate text-xs font-medium text-slate-200">{{ entryTargets(entry).b }}</span>
+            </div>
+            <div class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+              <span
+                class="rounded px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wider"
+                :class="entry.mode === 'sitemap' ? 'bg-sky-950/80 text-sky-400' : 'bg-emerald-950/80 text-emerald-400'"
+              >{{ entry.mode === 'sitemap' ? 'Sitemap' : 'Direct' }}</span>
+              <span class="text-[11px] text-slate-500">{{ entry.viewports.join(', ') }}px</span>
+              <span v-if="entry.savedAt" class="text-[11px] text-slate-600">{{ entryDate(entry) }} · {{ entryTime(entry) }}</span>
+            </div>
+          </div>
+          <svg class="size-3.5 shrink-0 text-slate-700 transition group-hover:text-slate-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.22 5.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L11.94 10 8.22 6.28a.75.75 0 0 1 0-1.06Z" clip-rule="evenodd"/></svg>
+        </li>
+      </ul>
+    </div>
   </div>
 
   <form

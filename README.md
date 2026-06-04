@@ -138,6 +138,18 @@ You can configure crawl limits in the UI:
 
 Each result row has a **Re-run** button that re-captures and re-diffs just that page using the same viewports and blocked globs as the original run, without restarting the whole job.
 
+## PDF export
+
+Once a run finishes, an **Export PDF** button appears in the top-right header. Clicking it downloads a PDF report that contains:
+
+- A cover page with the compared URLs, overall diff percentage, page count, and viewports
+- One section per page, grouped by page path, with all viewport diffs together
+- Full-height diff images for every page × viewport combination
+
+The PDF is generated on-demand by Playwright printing a styled HTML report page. Large sitemap runs with many pages or tall pages will produce a large PDF.
+
+The export is also available for saved runs loaded from the **Saved runs** panel.
+
 ## Notes
 
 - Generated screenshots live in `public/runs/<jobId>/` and are pruned after 24h.

@@ -1,24 +1,15 @@
 import { join } from 'node:path'
-import { mkdir, writeFile, access } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { captureUrl, SkippablePageError } from './capture'
 import { discoverPagePairs } from './discovery'
-import { diffPngs } from './diff'
+import { diffPngs, generateThumbnail } from './diff'
 import { getJob, getAbortSignal, pushEvent, setStatus } from './jobs'
-
-async function getRunsRoot(): Promise<string> {
-  const outputPublic = join(process.cwd(), '.output', 'public')
-  try {
-    await access(outputPublic)
-    return join(outputPublic, 'runs')
-  } catch {
-    return join(process.cwd(), 'public', 'runs')
-  }
-}
+import { getRunsRoot } from './runs-root'
 
 export async function runJob(jobId: string) {
   const job = getJob(jobId)
   if (!job) return
-  const runDir = join(await getRunsRoot(), jobId)
+  const runDir = join(getRunsRoot(), jobId)
   await mkdir(runDir, { recursive: true })
 
   setStatus(jobId, 'running')
@@ -75,6 +66,16 @@ export async function runJob(jobId: string) {
     }
 
     job.totalPercent = totalPixels > 0 ? (totalMismatched / totalPixels) * 100 : 0
+
+    if (job.results.length > 0) {
+      const thumbResult = job.results.find(r => r.pagePath === '/') ?? job.results[0]
+      const aFile = join(getRunsRoot(), jobId, thumbResult.files.a.replace(`/runs/${jobId}/`, ''))
+      const bFile = join(getRunsRoot(), jobId, thumbResult.files.b.replace(`/runs/${jobId}/`, ''))
+      try {
+        await generateThumbnail(aFile, bFile, join(runDir, 'thumbnail.png'))
+      } catch {}
+    }
+
     const manifest = {
       id: jobId,
       savedAt: Date.now(),

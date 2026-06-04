@@ -1,5 +1,6 @@
 import { chromium, type Browser } from 'playwright'
 import micromatch from 'micromatch'
+import { rewriteLocalhost } from './discovery'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 
@@ -33,6 +34,7 @@ export async function captureUrl(opts: {
   const context = await browser.newContext({
     viewport: { width: opts.width, height: 900 },
     deviceScaleFactor: 1,
+    ignoreHTTPSErrors: true,
     userAgent:
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 VisiDiff/1.0'
   })
@@ -49,7 +51,7 @@ export async function captureUrl(opts: {
     }
 
     opts.onPhase?.('load')
-    const response = await page.goto(opts.url, { waitUntil: 'networkidle', timeout: 45000 })
+    const response = await page.goto(rewriteLocalhost(opts.url), { waitUntil: 'networkidle', timeout: 45000 })
     const status = response?.status()
     if (status === 404) {
       throw new SkippablePageError(`Page returned 404: ${opts.url}`, 404)

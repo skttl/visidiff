@@ -1,5 +1,6 @@
 import { XMLParser } from 'fast-xml-parser'
 import { parse } from 'node-html-parser'
+import { existsSync } from 'node:fs'
 import type { CrawlLimits } from './jobs'
 
 export interface DiscoveredPagePair {
@@ -13,6 +14,13 @@ const xmlParser = new XMLParser({
   trimValues: true,
   parseTagValue: false
 })
+
+const IN_DOCKER = existsSync('/.dockerenv')
+
+export function rewriteLocalhost(url: string): string {
+  if (!IN_DOCKER) return url
+  return url.replace(/(\/\/)(localhost)([:/?#]|$)/g, '$1host.docker.internal$3')
+}
 
 export function normalizeDirectUrl(value: string) {
   const url = new URL(value)
@@ -126,7 +134,7 @@ async function discoverSitemapUrls(origin: string) {
   const urls = new Set<string>()
 
   try {
-    const robotsRes = await fetch(new URL('/robots.txt', origin), { redirect: 'follow' })
+    const robotsRes = await fetch(rewriteLocalhost(new URL('/robots.txt', origin).toString()), { redirect: 'follow' })
     if (robotsRes.ok) {
       const text = await robotsRes.text()
       for (const line of text.split(/\r?\n/)) {
@@ -161,7 +169,7 @@ async function collectSitemapPages(opts: {
     seenSitemaps.add(sitemapUrl)
 
     try {
-      const res = await fetch(sitemapUrl, { redirect: 'follow' })
+      const res = await fetch(rewriteLocalhost(sitemapUrl), { redirect: 'follow' })
       if (!res.ok) continue
       const xml = await res.text()
       const doc = xmlParser.parse(xml)
@@ -202,7 +210,7 @@ async function crawlHostPages(origin: string, limits: CrawlLimits) {
     visited.add(next.url)
 
     try {
-      const res = await fetch(next.url, {
+      const res = await fetch(rewriteLocalhost(next.url), {
         redirect: 'follow',
         headers: { accept: 'text/html,application/xhtml+xml' }
       })

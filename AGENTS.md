@@ -64,14 +64,26 @@ Run production without the override:
 docker compose -f docker-compose.yml up --build
 ```
 
+## Routes
+
+- `/` — intro/home page with recent settings and saved runs
+- `/settings` — run configuration form (JobForm); submits → navigates to `/runs/:id`
+- `/runs` — saved runs list
+- `/runs/:id` — live run (SSE streaming) or saved run result viewer
+
 ## Important files
 
-- `pages/index.vue` - main UI, SSE handling, title/favicons/notifications, per-page re-run
+- `app.vue` - shared layout: sticky header with nav links, NuxtPage
+- `pages/index.vue` - intro/home page
+- `pages/settings.vue` - settings page with JobForm
+- `pages/runs/index.vue` - saved runs list page
+- `pages/runs/[id].vue` - run page: SSE handling, title/favicons/notifications, per-page re-run
 - `components/JobForm.vue` - run form and saved settings history
 - `components/ProgressLog.vue` - streamed job event log
 - `components/ViewportResult.vue` - diff result viewer
 - `server/api/run.post.ts` - job creation endpoint (used for full runs and per-page re-runs)
 - `server/api/events/[id].get.ts` - SSE event stream
+- `server/api/jobs/[id].get.ts` - in-memory job status (used by run page to detect live jobs)
 - `server/utils/runner.ts` - orchestrates capture + diff pipeline
 - `server/utils/capture.ts` - Playwright capture logic
 - `server/utils/diff.ts` - image diffing logic

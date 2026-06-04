@@ -8,6 +8,8 @@ services:
     volumes:
       - runs:/app/.output/public/runs
     restart: unless-stopped
+    extra_hosts:
+      - "localhost:host-gateway"
 
 volumes:
   runs:

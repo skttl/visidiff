@@ -1,17 +1,12 @@
-import { createReadStream, existsSync } from 'node:fs'
+import { createReadStream, existsSync, statSync } from 'node:fs'
 import { join, extname, resolve, normalize } from 'node:path'
+import { getRunsRoot } from '../../utils/runs-root'
 
 const MIME: Record<string, string> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
   '.json': 'application/json',
-}
-
-function getRunsRoot(): string {
-  const outputPublic = join(process.cwd(), '.output', 'public')
-  if (existsSync(outputPublic)) return join(outputPublic, 'runs')
-  return join(process.cwd(), 'public', 'runs')
 }
 
 export default defineEventHandler((event) => {
@@ -23,11 +18,13 @@ export default defineEventHandler((event) => {
     throw createError({ statusCode: 403 })
   }
 
-  if (!existsSync(filePath)) {
+  const ext = extname(filePath).toLowerCase()
+  if (!ext) return
+
+  if (!existsSync(filePath) || statSync(filePath).isDirectory()) {
     throw createError({ statusCode: 404 })
   }
 
-  const ext = extname(filePath).toLowerCase()
   const mime = MIME[ext] ?? 'application/octet-stream'
   setHeader(event, 'Content-Type', mime)
   setHeader(event, 'Cache-Control', 'public, max-age=31536000, immutable')
